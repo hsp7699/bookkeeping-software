@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 const columns: { label: string; items: { label: string; href?: string }[] }[] = [
   {
     label: "Customers",
-    items: [{ label: "Invoice", href: "/invoices/new" }, { label: "Receive payment", href: "/payments/new" }, { label: "Sales receipt" }, { label: "Credit memo" }],
+    items: [{ label: "Invoice", href: "/invoices/new" }, { label: "Receive payment", href: "/payments/new" }, { label: "Sales receipt", href: "/sales-receipts/new" }, { label: "Credit memo", href: "/credit-memos/new" }, { label: "Refund receipt", href: "/refunds/new" }],
   },
   { label: "Vendors", items: [{ label: "Expense" }, { label: "Check" }, { label: "Bill" }, { label: "Pay bills" }] },
   { label: "Other", items: [{ label: "Bank deposit" }, { label: "Transfer" }, { label: "Journal entry" }] },

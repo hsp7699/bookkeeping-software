@@ -13,6 +13,8 @@ import { addDays } from "@/lib/dates";
 import { formatCents, lineAmount } from "@/lib/money";
 import { computeTotals } from "@/lib/posting";
 import type { InvoiceDetail } from "@/lib/queries";
+import { TxnMoreMenu } from "@/components/txn-more-menu";
+import { EmailInvoiceDialog } from "./email-dialog";
 import { saveTransactionAction } from "../actions";
 import { CustomerDrawer } from "../customers/customer-drawer";
 import { ItemDrawer, type SavedItem } from "../items/item-drawer";
@@ -28,7 +30,21 @@ interface ItemOption {
   sales_price_cents: number | null;
   taxable: boolean;
 }
+export type SalesKind = "invoice" | "sales_receipt" | "credit_memo" | "refund_receipt";
+
+const KIND: Record<SalesKind, { title: string; noun: string; path: string; numberLabel: string; big: string; dateLabel: string }> = {
+  invoice: { title: "Invoice", noun: "invoice", path: "invoices", numberLabel: "Invoice no.", big: "Balance due", dateLabel: "Invoice date" },
+  sales_receipt: { title: "Sales receipt", noun: "sales receipt", path: "sales-receipts", numberLabel: "Receipt no.", big: "Amount", dateLabel: "Sale date" },
+  credit_memo: { title: "Credit memo", noun: "credit memo", path: "credit-memos", numberLabel: "Credit no.", big: "Credit amount", dateLabel: "Credit date" },
+  refund_receipt: { title: "Refund receipt", noun: "refund", path: "refunds", numberLabel: "Refund no.", big: "Refund amount", dateLabel: "Refund date" },
+};
+
+const METHODS = ["Check", "ACH / bank transfer", "Credit card", "Cash", "Other"];
+
 interface Props {
+  kind: SalesKind;
+  /** deposit-to (sales receipt) or paid-from (refund) choices */
+  moneyAccounts: { id: string; name: string; system_role: string | null }[];
   companyId: string;
   today: string;
   customers: { id: string; display_name: string; email: string | null; terms_id: string | null }[];
@@ -69,8 +85,12 @@ function withSpare(lines: Line[]) {
   return out;
 }
 
-export function InvoiceForm(props: Props) {
-  const { companyId, today, initial } = props;
+export function SalesForm(props: Props) {
+  const { companyId, today, initial, kind } = props;
+  const K = KIND[kind];
+  const isInvoice = kind === "invoice";
+  const hasMoneyAccount = kind === "sales_receipt" || kind === "refund_receipt";
+  const base = `/c/${companyId}/${K.path}`;
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +110,10 @@ export function InvoiceForm(props: Props) {
   const [taxRateId, setTaxRateId] = useState<string>(initial?.tax_rate_id ?? "");
   const [memo, setMemo] = useState(initial?.memo ?? "");
   const [privateNote, setPrivateNote] = useState(initial?.private_note ?? "");
+  const [accountId, setAccountId] = useState(initial?.account_id ?? props.moneyAccounts[0]?.id ?? "");
+  const [paymentMethod, setPaymentMethod] = useState(initial?.payment_method ?? "Check");
+  const [closePassword, setClosePassword] = useState<string | null>(null);
+  const [emailOpen, setEmailOpen] = useState(false);
   const [lines, setLines] = useState<Line[]>(() =>
     withSpare(
       (initial?.lines ?? []).map((l) => ({
@@ -162,13 +186,15 @@ export function InvoiceForm(props: Props) {
     const bad = filled.find((l) => !l.itemId);
     if (bad) return setError(`Line ${filled.indexOf(bad) + 1}: choose a product or service.`);
     const payload = {
-      type: "invoice" as const,
+      type: kind,
       id: initial?.id,
       ifUpdatedAt: initial?.updated_at,
       contactId,
       txnDate,
-      dueDate,
-      termsId,
+      dueDate: isInvoice ? dueDate : null,
+      termsId: isInvoice ? termsId : null,
+      accountId: hasMoneyAccount ? accountId || null : null,
+      paymentMethod: hasMoneyAccount ? paymentMethod : null,
       number: number.trim() || null,
       lines: filled.map((l) => ({
         itemId: l.itemId,
@@ -187,14 +213,17 @@ export function InvoiceForm(props: Props) {
     if (!contactId) return setError("Choose a customer.");
     if (filled.length === 0) return setError("Add at least one line.");
     start(async () => {
-      const res = await saveTransactionAction(companyId, payload);
-      if (!res.ok) return setError(res.error);
+      const res = await saveTransactionAction(companyId, payload, closePassword ?? undefined);
+      if (!res.ok) {
+        if (res.error.includes("closed period") && closePassword == null) setClosePassword("");
+        return setError(res.error);
+      }
       if (then === "new") {
-        router.push(`/c/${companyId}/invoices/new?saved=${res.data.number}`);
+        router.push(`${base}/new?saved=${res.data.number ?? ""}`);
         router.refresh();
-      } else if (then === "close") router.push(`/c/${companyId}/invoices`);
+      } else if (then === "close") router.push(`/c/${companyId}/sales`);
       else {
-        router.replace(`/c/${companyId}/invoices/${res.data.id}?saved=1`);
+        router.replace(`${base}/${res.data.id}?saved=1`);
         router.refresh();
       }
     });
@@ -217,7 +246,7 @@ export function InvoiceForm(props: Props) {
   const status =
     initial?.status === "voided" ? (
       <StatusPill tone="voided">Voided</StatusPill>
-    ) : initial && initial.balance_cents === 0 ? (
+    ) : !isInvoice ? null : initial && initial.balance_cents === 0 ? (
       <StatusPill tone="paid">Paid</StatusPill>
     ) : initial && paid > 0 ? (
       <StatusPill tone="partial">Partially paid</StatusPill>
@@ -227,10 +256,10 @@ export function InvoiceForm(props: Props) {
     <div className="-m-6 flex min-h-[calc(100dvh-var(--header-height))] flex-col bg-bg">
       <div className="flex items-center justify-between border-b border-border px-6 py-3">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold">{initial ? `Invoice ${initial.number ?? ""}` : "New invoice"}</h1>
+          <h1 className="text-lg font-semibold">{initial ? `${K.title} ${initial.number ?? ""}` : `New ${K.noun}`}</h1>
           {status}
         </div>
-        <Link href={`/c/${companyId}/invoices`} className="rounded-sm p-1 text-text-muted hover:bg-row-hover" aria-label="Close">
+        <Link href={`/c/${companyId}/sales`} className="rounded-sm p-1 text-text-muted hover:bg-row-hover" aria-label="Close">
           <X className="size-5" />
         </Link>
       </div>
@@ -240,6 +269,16 @@ export function InvoiceForm(props: Props) {
           <p role="alert" className="mb-4 rounded-md bg-danger-soft px-3 py-2 text-on-danger-soft">
             {error}
           </p>
+        )}
+        {closePassword != null && (
+          <div className="mb-4 flex max-w-sm items-end gap-2">
+            <Field label="Close-books password" className="flex-1">
+              {(p) => <Input {...p} type="password" value={closePassword} onChange={(e) => setClosePassword(e.target.value)} />}
+            </Field>
+          </div>
+        )}
+        {initial?.status === "voided" && (
+          <p className="mb-4 rounded-md bg-danger-soft px-3 py-2 text-on-danger-soft">This {K.noun} is voided. It stays in your records but doesn&apos;t affect your books.</p>
         )}
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -259,6 +298,7 @@ export function InvoiceForm(props: Props) {
             <Field label="Customer email" className="sm:col-span-2">
               {(p) => <Input {...p} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />}
             </Field>
+            {isInvoice && (
             <Field label="Terms">
               {(p) => (
                 <NativeSelect
@@ -278,7 +318,32 @@ export function InvoiceForm(props: Props) {
                 </NativeSelect>
               )}
             </Field>
-            <Field label="Invoice date">
+            )}
+            {hasMoneyAccount && (
+              <>
+                <Field label={kind === "sales_receipt" ? "Deposit to" : "Refund from"}>
+                  {(p) => (
+                    <NativeSelect {...p} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+                      {props.moneyAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  )}
+                </Field>
+                <Field label="Payment method">
+                  {(p) => (
+                    <NativeSelect {...p} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+                      {METHODS.map((m) => (
+                        <option key={m}>{m}</option>
+                      ))}
+                    </NativeSelect>
+                  )}
+                </Field>
+              </>
+            )}
+            <Field label={K.dateLabel}>
               {(p) => (
                 <Input
                   {...p}
@@ -291,20 +356,20 @@ export function InvoiceForm(props: Props) {
                 />
               )}
             </Field>
-            <Field label="Due date">{(p) => <Input {...p} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />}</Field>
-            <Field label="Invoice no." hint={initial ? undefined : "Leave blank for the next number"}>
+            {isInvoice && <Field label="Due date">{(p) => <Input {...p} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />}</Field>}
+            <Field label={K.numberLabel} hint={initial ? undefined : "Leave blank for the next number"}>
               {(p) => <Input {...p} value={number} onChange={(e) => setNumber(e.target.value)} maxLength={21} />}
             </Field>
           </div>
           <div className="min-w-48 text-right">
-            <p className="text-sm font-medium tracking-wide text-text-muted uppercase">Balance due</p>
+            <p className="text-sm font-medium tracking-wide text-text-muted uppercase">{K.big}</p>
             <p className="num text-display font-bold">{formatCents(balanceDue)}</p>
           </div>
         </div>
 
         {/* Line grid */}
         <div className="mt-8 overflow-x-auto">
-          <table className="w-full min-w-[760px] border-collapse" aria-label="Invoice lines">
+          <table className="w-full min-w-[760px] border-collapse" aria-label={`${K.title} lines`}>
             <thead>
               <tr className="text-left text-xs font-medium tracking-wide text-text-muted uppercase">
                 <th className="w-8" />
@@ -416,7 +481,7 @@ export function InvoiceForm(props: Props) {
 
         <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_22rem]">
           <div className="flex flex-col gap-4">
-            <Field label="Message on invoice">{(p) => <Textarea {...p} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Thank you for your business." />}</Field>
+            <Field label={`Message on ${K.noun}`}>{(p) => <Textarea {...p} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Thank you for your business." />}</Field>
             <Field label="Note to self" hint="Only you see this.">
               {(p) => <Textarea {...p} value={privateNote} onChange={(e) => setPrivateNote(e.target.value)} />}
             </Field>
@@ -449,16 +514,18 @@ export function InvoiceForm(props: Props) {
               <dt>Total</dt>
               <dd className="num">{formatCents(totals.totalCents)}</dd>
             </div>
-            {paid > 0 && (
+            {isInvoice && paid > 0 && (
               <div className="flex justify-between text-text-muted">
                 <dt>Payments received</dt>
                 <dd className="num">{formatCents(-paid)}</dd>
               </div>
             )}
-            <div className="flex justify-between font-semibold">
-              <dt>Balance due</dt>
-              <dd className="num">{formatCents(balanceDue)}</dd>
-            </div>
+            {isInvoice && (
+              <div className="flex justify-between font-semibold">
+                <dt>Balance due</dt>
+                <dd className="num">{formatCents(balanceDue)}</dd>
+              </div>
+            )}
           </dl>
         </div>
       </div>
@@ -466,24 +533,47 @@ export function InvoiceForm(props: Props) {
       <div className="sticky bottom-0 flex h-[var(--form-action-bar-height)] items-center justify-between gap-2 border-t border-border bg-bg px-6">
         <div className="flex gap-2">
           <Button asChild>
-            <Link href={`/c/${companyId}/invoices`}>Cancel</Link>
+            <Link href={`/c/${companyId}/sales`}>Cancel</Link>
           </Button>
-          {initial && initial.balance_cents > 0 && (
+          {initial && (
+            <TxnMoreMenu
+              companyId={companyId}
+              txnId={initial.id}
+              label={K.noun}
+              voided={initial.status === "voided"}
+              afterDelete={`/c/${companyId}/sales`}
+              extra={[
+                { label: "Print or download PDF", onSelect: () => window.open(`${base}/${initial.id}/pdf`, "_blank") },
+                ...(isInvoice && initial.status !== "voided" ? [{ label: "Email invoice", onSelect: () => setEmailOpen(true) }] : []),
+              ]}
+            />
+          )}
+          {isInvoice && initial && initial.balance_cents > 0 && (
             <Button asChild variant="ghost">
               <Link href={`/c/${companyId}/payments/new?customer=${initial.contact_id}&invoice=${initial.id}`}>Receive payment</Link>
             </Button>
           )}
         </div>
         <div className="flex gap-2">
-          <Button onClick={() => save("new")} disabled={pending}>
+          <Button onClick={() => save("new")} disabled={pending || initial?.status === "voided"}>
             Save and new
           </Button>
-          <Button id="invoice-save" variant="primary" loading={pending} onClick={() => save("stay")}>
+          <Button id="invoice-save" variant="primary" loading={pending} disabled={initial?.status === "voided"} onClick={() => save("stay")}>
             Save
           </Button>
         </div>
       </div>
 
+      {initial && isInvoice && (
+        <EmailInvoiceDialog
+          companyId={companyId}
+          invoiceId={initial.id}
+          number={initial.number}
+          defaultTo={email}
+          open={emailOpen}
+          onOpenChange={setEmailOpen}
+        />
+      )}
       <CustomerDrawer
         companyId={companyId}
         open={customerDrawer != null}

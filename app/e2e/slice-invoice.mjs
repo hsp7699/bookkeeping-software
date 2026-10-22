@@ -67,7 +67,7 @@ await p.getByRole("textbox", { name: /^Amount received/ }).fill("1000");
 await p.getByRole("textbox", { name: /^Amount received/ }).blur();
 await p.screenshot({ path: `${out}/payment-form.png`, fullPage: true });
 await p.getByRole("button", { name: "Save and close" }).click();
-await p.waitForURL(/\/invoices$/, { timeout: 60000 });
+await p.waitForURL(/\/sales$/, { timeout: 60000 });
 await p.getByText("Partially paid").waitFor();
 await p.screenshot({ path: `${out}/invoices-list.png` });
 step("payment saved, invoice partially paid");

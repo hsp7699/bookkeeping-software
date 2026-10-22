@@ -9,6 +9,7 @@ import { Combobox } from "@/components/ui/combobox";
 import { Field, Input, MoneyInput, NativeSelect, Textarea } from "@/components/ui/field";
 import { formatDate } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
+import { TxnMoreMenu } from "@/components/txn-more-menu";
 import { openInvoicesAction, saveTransactionAction } from "../actions";
 
 interface OpenInvoice {
@@ -20,7 +21,22 @@ interface OpenInvoice {
   balance_cents: number;
 }
 
+export interface PaymentDetail {
+  id: string;
+  contact_id: string;
+  txn_date: string;
+  account_id: string;
+  payment_method: string | null;
+  number: string | null;
+  total_cents: number;
+  memo: string | null;
+  status: string;
+  updated_at: string;
+  applications: { txn_id: string; amount_cents: number }[];
+}
+
 interface Props {
+  initial?: PaymentDetail | null;
   companyId: string;
   today: string;
   customers: { id: string; display_name: string }[];
@@ -50,13 +66,14 @@ export function PaymentForm(props: Props) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const undeposited = props.depositAccounts.find((a) => a.system_role === "undeposited_funds")?.id ?? "";
-  const [contactId, setContactId] = useState<string | null>(props.presetCustomerId ?? null);
-  const [txnDate, setTxnDate] = useState(props.today);
-  const [method, setMethod] = useState("Check");
-  const [ref, setRef] = useState("");
-  const [depositTo, setDepositTo] = useState(undeposited);
-  const [amount, setAmount] = useState<number | null>(null);
-  const [memo, setMemo] = useState("");
+  const initial = props.initial ?? null;
+  const [contactId, setContactId] = useState<string | null>(initial?.contact_id ?? props.presetCustomerId ?? null);
+  const [txnDate, setTxnDate] = useState(initial?.txn_date ?? props.today);
+  const [method, setMethod] = useState(initial?.payment_method ?? "Check");
+  const [ref, setRef] = useState(initial?.number ?? "");
+  const [depositTo, setDepositTo] = useState(initial?.account_id ?? undeposited);
+  const [amount, setAmount] = useState<number | null>(initial?.total_cents ?? null);
+  const [memo, setMemo] = useState(initial?.memo ?? "");
   const [invoices, setInvoices] = useState<OpenInvoice[] | null>(null);
   const [applied, setApplied] = useState<Record<string, number>>({});
 
@@ -66,9 +83,13 @@ export function PaymentForm(props: Props) {
       return;
     }
     let cancelled = false;
-    openInvoicesAction(companyId, contactId).then((rows) => {
+    openInvoicesAction(companyId, contactId, initial?.id).then((rows) => {
       if (cancelled) return;
       setInvoices(rows);
+      if (initial && contactId === initial.contact_id) {
+        setApplied(Object.fromEntries(initial.applications.map((a) => [a.txn_id, a.amount_cents])));
+        return;
+      }
       // Coming from an invoice: pay that one in full
       const preset = rows.find((r) => r.id === props.presetInvoiceId);
       if (preset) {
@@ -81,7 +102,7 @@ export function PaymentForm(props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [companyId, contactId, props.presetInvoiceId]);
+  }, [companyId, contactId, props.presetInvoiceId, initial]);
 
   const appliedTotal = Object.values(applied).reduce((a, b) => a + b, 0);
   const received = amount ?? 0;
@@ -95,6 +116,8 @@ export function PaymentForm(props: Props) {
     start(async () => {
       const res = await saveTransactionAction(companyId, {
         type: "payment",
+        id: initial?.id,
+        ifUpdatedAt: initial?.updated_at,
         contactId,
         txnDate,
         depositToId: depositTo || null,
@@ -107,7 +130,7 @@ export function PaymentForm(props: Props) {
         memo: memo || null,
       });
       if (!res.ok) return setError(res.error);
-      router.push(then === "new" ? `/c/${companyId}/payments/new?saved=1` : `/c/${companyId}/invoices`);
+      router.push(then === "new" ? `/c/${companyId}/payments/new?saved=1` : `/c/${companyId}/sales`);
       router.refresh();
     });
   }
@@ -115,8 +138,8 @@ export function PaymentForm(props: Props) {
   return (
     <div className="-m-6 flex min-h-[calc(100dvh-var(--header-height))] flex-col bg-bg">
       <div className="flex items-center justify-between border-b border-border px-6 py-3">
-        <h1 className="text-lg font-semibold">Receive payment</h1>
-        <Link href={`/c/${companyId}/invoices`} className="rounded-sm p-1 text-text-muted hover:bg-row-hover" aria-label="Close">
+        <h1 className="text-lg font-semibold">{initial ? "Payment" : "Receive payment"}</h1>
+        <Link href={`/c/${companyId}/sales`} className="rounded-sm p-1 text-text-muted hover:bg-row-hover" aria-label="Close">
           <X className="size-5" />
         </Link>
       </div>
@@ -267,9 +290,14 @@ export function PaymentForm(props: Props) {
         </div>
       </div>
       <div className="sticky bottom-0 flex h-[var(--form-action-bar-height)] items-center justify-between gap-2 border-t border-border bg-bg px-6">
-        <Button asChild>
-          <Link href={`/c/${companyId}/invoices`}>Cancel</Link>
-        </Button>
+        <div className="flex gap-2">
+          <Button asChild>
+            <Link href={`/c/${companyId}/sales`}>Cancel</Link>
+          </Button>
+          {initial && (
+            <TxnMoreMenu companyId={companyId} txnId={initial.id} label="payment" voided={initial.status === "voided"} afterDelete={`/c/${companyId}/sales`} />
+          )}
+        </div>
         <div className="flex gap-2">
           <Button onClick={() => save("new")} disabled={pending}>
             Save and new

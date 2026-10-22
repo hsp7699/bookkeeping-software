@@ -7,6 +7,7 @@ import {
   History,
   Home,
   Landmark,
+  ListChecks,
   Package,
   Receipt,
   Scale,
@@ -32,6 +33,7 @@ const groups: { label?: string; items: Item[] }[] = [
   {
     label: "Sales",
     items: [
+      { href: "/sales", label: "Sales transactions", icon: ListChecks },
       { href: "/invoices", label: "Invoices", icon: FileText },
       { href: "/customers", label: "Customers", icon: Users },
       { href: "/items", label: "Products & services", icon: Package },

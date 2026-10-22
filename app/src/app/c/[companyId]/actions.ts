@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { one, query } from "@/db";
 import { requireCompany } from "@/lib/authz";
-import { saveTransaction, UserError } from "@/lib/txn/save";
+import { deleteTransaction, saveTransaction, UserError, voidTransaction } from "@/lib/txn/save";
 
 export type ActionResult<T = unknown> = { ok: true; data: T } | { ok: false; error: string; fieldErrors?: Record<string, string> };
 
@@ -126,10 +126,23 @@ export async function saveItemAction(
   }
 }
 
-export async function saveTransactionAction(companyId: string, raw: unknown): Promise<ActionResult<{ id: string; number: string | null }>> {
+async function checkClosePassword(companyId: string, password: string): Promise<boolean> {
+  const { verify } = await import("@node-rs/argon2");
+  const c = await one<{ close_password_hash: string | null }>("select close_password_hash from companies where id = $1", [companyId]);
+  if (!c?.close_password_hash || !(await verify(c.close_password_hash, password))) throw new UserError("That close-books password isn't right.");
+  return true;
+}
+
+export async function saveTransactionAction(
+  companyId: string,
+  raw: unknown,
+  closePassword?: string,
+): Promise<ActionResult<{ id: string; number: string | null }>> {
   const ctx = await requireCompany(companyId, "standard");
   try {
-    const result = await saveTransaction(companyId, ctx.userId, raw);
+    const closeOverride = closePassword ? await checkClosePassword(companyId, closePassword) : false;
+    const result = await saveTransaction(companyId, ctx.userId, raw, { closeOverride });
+    if (closeOverride) await auditCloseOverride(companyId, ctx.userId, result.id);
     revalidatePath(`/c/${companyId}`, "layout");
     return { ok: true, data: result };
   } catch (e) {
@@ -150,4 +163,33 @@ export async function openInvoicesAction(companyId: string, contactId: string, p
      order by t.due_date nulls last, t.txn_date, t.number`,
     [companyId, contactId, paymentId ?? null],
   );
+}
+
+async function auditCloseOverride(companyId: string, userId: string, txnId: string) {
+  await query("insert into audit_events (company_id, user_id, entity, entity_id, action) values ($1, $2, 'transaction', $3, 'close_override')", [companyId, userId, txnId]);
+}
+
+export async function voidTransactionAction(companyId: string, id: string, closePassword?: string): Promise<ActionResult<null>> {
+  const ctx = await requireCompany(companyId, "standard");
+  try {
+    const closeOverride = closePassword ? await checkClosePassword(companyId, closePassword) : false;
+    await voidTransaction(companyId, ctx.userId, id, { closeOverride });
+    if (closeOverride) await auditCloseOverride(companyId, ctx.userId, id);
+    revalidatePath(`/c/${companyId}`, "layout");
+    return { ok: true, data: null };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function deleteTransactionAction(companyId: string, id: string, closePassword?: string): Promise<ActionResult<null>> {
+  const ctx = await requireCompany(companyId, "standard");
+  try {
+    const closeOverride = closePassword ? await checkClosePassword(companyId, closePassword) : false;
+    await deleteTransaction(companyId, ctx.userId, id, { closeOverride });
+    revalidatePath(`/c/${companyId}`, "layout");
+    return { ok: true, data: null };
+  } catch (e) {
+    return fail(e);
+  }
 }

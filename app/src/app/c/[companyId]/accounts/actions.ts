@@ -5,7 +5,7 @@ import { z } from "zod";
 import { one, query } from "@/db";
 import { requireCompany } from "@/lib/authz";
 import { BALANCE_SHEET_TYPES, DETAIL_TYPES, type AccountType } from "@/lib/coa";
-import { deleteTransaction, saveTransaction, UserError } from "@/lib/txn/save";
+import { saveTransaction, UserError } from "@/lib/txn/save";
 import type { ActionResult } from "../actions";
 
 const TYPES = Object.keys(DETAIL_TYPES) as [AccountType, ...AccountType[]];
@@ -106,25 +106,4 @@ export async function setAccountActiveAction(companyId: string, id: string, acti
   await query("insert into audit_events (company_id, user_id, entity, entity_id, action, after) values ($1, $2, 'account', $3, 'update', $4)", [companyId, ctx.userId, id, JSON.stringify({ active })]);
   revalidatePath(`/c/${companyId}`, "layout");
   return { ok: true, data: null };
-}
-
-export async function deleteTransactionAction(companyId: string, id: string, closePassword?: string): Promise<ActionResult<null>> {
-  const ctx = await requireCompany(companyId, "standard");
-  try {
-    const closeOverride = closePassword ? await checkClosePassword(companyId, closePassword) : false;
-    await deleteTransaction(companyId, ctx.userId, id, { closeOverride });
-    revalidatePath(`/c/${companyId}`, "layout");
-    return { ok: true, data: null };
-  } catch (e) {
-    if (e instanceof UserError) return { ok: false, error: e.message };
-    console.error(e);
-    return { ok: false, error: "Something went wrong deleting that." };
-  }
-}
-
-async function checkClosePassword(companyId: string, password: string): Promise<boolean> {
-  const { verify } = await import("@node-rs/argon2");
-  const c = await one<{ close_password_hash: string | null }>("select close_password_hash from companies where id = $1", [companyId]);
-  if (!c?.close_password_hash || !(await verify(c.close_password_hash, password))) throw new UserError("That close-books password isn't right.");
-  return true;
 }

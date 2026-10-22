@@ -181,6 +181,9 @@ export function listInvoices(companyId: string, status: "all" | "open" | "overdu
 
 export interface InvoiceDetail {
   id: string;
+  type: string;
+  account_id: string | null;
+  payment_method: string | null;
   number: string | null;
   contact_id: string;
   txn_date: string;
@@ -209,16 +212,17 @@ export interface InvoiceDetail {
   payments: { id: string; txn_date: string; amount_cents: number }[];
 }
 
-export function getInvoice(companyId: string, id: string) {
+/** Any sales form: invoice, sales receipt, credit memo, refund receipt. */
+export function getSalesDoc(companyId: string, id: string, type: string) {
   return one<InvoiceDetail>(
-    `select t.id, t.number, t.contact_id, t.txn_date, t.due_date, t.terms_id, t.memo, t.private_note, t.discount_cents, t.tax_rate_id,
-            t.subtotal_cents, t.tax_cents, t.total_cents, t.balance_cents, t.status, t.email_to, t.updated_at::text as updated_at,
+    `select t.id, t.type, t.account_id, t.payment_method, t.number, t.contact_id, t.txn_date, t.due_date, t.terms_id, t.memo, t.private_note, t.discount_cents, t.tax_rate_id,
+            t.subtotal_cents, t.tax_cents, t.total_cents, t.balance_cents, t.status, t.email_to::text[] as email_to, t.updated_at::text as updated_at,
             coalesce((select json_agg(json_build_object('item_id', l.item_id, 'account_id', l.account_id, 'description', l.description,
                'qty', l.qty, 'rate_cents', l.rate_cents, 'amount_cents', l.amount_cents, 'taxable', l.taxable) order by l.position)
              from transaction_lines l where l.transaction_id = t.id), '[]') as lines,
             coalesce((select json_agg(json_build_object('id', p.id, 'txn_date', p.txn_date, 'amount_cents', a.amount_cents) order by p.txn_date)
              from payment_applications a join transactions p on p.id = a.source_txn_id where a.target_txn_id = t.id), '[]') as payments
-     from transactions t where t.company_id = $1 and t.id = $2 and t.type = 'invoice'`,
-    [companyId, id],
+     from transactions t where t.company_id = $1 and t.id = $2 and t.type = $3`,
+    [companyId, id, type],
   );
 }
