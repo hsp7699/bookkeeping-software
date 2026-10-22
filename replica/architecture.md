@@ -11,7 +11,7 @@ company to start, multi-company ready, self-hosted.
 | styling | Tailwind + tokens from /replica-design; headless UI from Radix | lots of dense tables and forms; Radix gives accessible comboboxes, menus and dialogs |
 | tables / grids | TanStack Table; a small custom editable line grid | registers, lists and reports all need sorting, grouping and keyboard editing |
 | database | PostgreSQL 16, self-hosted in Docker | the integrity rules (balanced entries, closed period, reconcile lock) are enforced in the database, see schema.sql |
-| ORM | Drizzle, with `schema.sql` as the first migration (`drizzle-kit introspect` for types) | thin, SQL-shaped; reports drop to raw SQL easily |
+| data access | `pg` with small typed query helpers; plain SQL migrations in `app/db/migrations` (`node db/migrate.mjs`) | the SQL is the source of truth and reports are SQL anyway (Drizzle was dropped: its introspection could not handle citext) |
 | money math | integer cents (`bigint`) end to end; `dinero.js`-style helpers, no floats | no rounding drift |
 | auth | Auth.js v5: email + password (argon2id) and optional Google; database sessions in Postgres | self-hosted, no third-party auth bill |
 | email | Nodemailer over SMTP with your own provider (Postmark, SES or Fastmail) | invoices, password resets, invites |
@@ -28,7 +28,7 @@ No microservices. One app, one database.
 
 ## Schema
 
-Tables: 24 (see `replica/schema.sql`, tested on Postgres 16).
+Tables: 24 (see `app/db/migrations/0001_init.sql`, tested on Postgres 16).
 Access rules: **data-layer checks.** Every server action calls
 `requireCompany(session, companyId, minRole)`, which loads the membership,
 then queries with `where company_id = $companyId`. Composite foreign keys
