@@ -9,12 +9,13 @@ import { Button } from "@/components/ui/button";
 const columns: { label: string; items: { label: string; href?: string }[] }[] = [
   {
     label: "Customers",
-    items: [{ label: "Invoice", href: "/invoices/new" }, { label: "Receive payment", href: "/payments/new" }, { label: "Sales receipt", href: "/sales-receipts/new" }, { label: "Credit memo", href: "/credit-memos/new" }, { label: "Refund receipt", href: "/refunds/new" }],
+    items: [{ label: "Invoice", href: "/invoices/new" }, { label: "Estimate", href: "/estimates/new" }, { label: "Receive payment", href: "/payments/new" }, { label: "Sales receipt", href: "/sales-receipts/new" }, { label: "Credit memo", href: "/credit-memos/new" }, { label: "Refund receipt", href: "/refunds/new" }],
   },
   { label: "Vendors", items: [
       { label: "Expense", href: "/expenses/new" },
       { label: "Check", href: "/checks/new" },
       { label: "Bill", href: "/bills/new" },
+      { label: "Purchase order", href: "/purchase-orders/new" },
       { label: "Pay bills", href: "/bills/pay" },
       { label: "Vendor credit", href: "/vendor-credits/new" },
       { label: "Credit card credit", href: "/card-credits/new" },

@@ -5,7 +5,7 @@ import { Card, Table, Td, Th, Tr } from "@/components/ui/table";
 import { requireCompany } from "@/lib/authz";
 import { cn } from "@/lib/cn";
 import { formatCents } from "@/lib/money";
-import { customerMoneyBar, listCustomers, listTaxRates, listTerms } from "@/lib/queries";
+import { asTree, customerMoneyBar, listCustomers, listTaxRates, listTerms } from "@/lib/queries";
 import { NewCustomerButton } from "./new-customer-button";
 
 type Filter = "all" | "open" | "overdue";
@@ -34,7 +34,7 @@ export default async function CustomersPage({
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">Customers</h1>
-        <NewCustomerButton companyId={companyId} terms={terms} taxRates={taxRates} />
+        <NewCustomerButton companyId={companyId} terms={terms} taxRates={taxRates} parents={rows.map((r) => ({ id: r.id, display_name: r.display_name }))} />
       </div>
 
       <Card className="grid grid-cols-1 gap-px overflow-hidden bg-border sm:grid-cols-3" aria-label="Money bar">
@@ -81,9 +81,9 @@ export default async function CustomersPage({
               </tr>
             </thead>
             <tbody>
-              {rows.map((c) => (
+              {asTree(rows).map((c) => (
                 <Tr key={c.id}>
-                  <Td>
+                  <Td style={{ paddingLeft: 12 + c.depth * 24 }}>
                     <Link href={`${base}/${c.id}`} className="font-medium text-accent hover:underline">
                       {c.display_name}
                     </Link>

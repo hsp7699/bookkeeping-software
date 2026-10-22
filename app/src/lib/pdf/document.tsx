@@ -84,7 +84,7 @@ export function SalesPdf({ d }: { d: PdfDoc }) {
             </View>
             {d.dueDate && (
               <View style={s.totalRow}>
-                <Text style={s.muted}>Due date</Text>
+                <Text style={s.muted}>{d.title === "Estimate" ? "Valid until" : "Due date"}</Text>
                 <Text>{formatDate(d.dueDate)}</Text>
               </View>
             )}

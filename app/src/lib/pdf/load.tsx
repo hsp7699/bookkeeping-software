@@ -3,7 +3,7 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { one } from "@/db";
 import { SalesPdf, type PdfDoc } from "./document";
 
-const TITLE: Record<string, string> = { invoice: "Invoice", sales_receipt: "Sales receipt", credit_memo: "Credit memo", refund_receipt: "Refund receipt" };
+const TITLE: Record<string, string> = { invoice: "Invoice", sales_receipt: "Sales receipt", credit_memo: "Credit memo", refund_receipt: "Refund receipt", estimate: "Estimate" };
 
 export async function loadPdfDoc(companyId: string, id: string, type: string): Promise<PdfDoc | null> {
   const r = await one<{
@@ -27,6 +27,7 @@ export async function loadPdfDoc(companyId: string, id: string, type: string): P
     balance_cents: number;
     memo: string | null;
     status: string;
+    expires_on: string | null;
   }>(
     `select t.number, t.txn_date, t.due_date, tm.name as terms, co.name as company_name, co.address as company_address,
             co.email as company_email, co.phone as company_phone, c.display_name as customer_name,
@@ -34,7 +35,7 @@ export async function loadPdfDoc(companyId: string, id: string, type: string): P
             coalesce((select json_agg(json_build_object('name', i.name, 'description', l.description, 'qty', l.qty,
                'rateCents', l.rate_cents, 'amountCents', l.amount_cents) order by l.position)
               from transaction_lines l left join items i on i.id = l.item_id where l.transaction_id = t.id), '[]') as lines,
-            t.subtotal_cents, t.discount_cents, tr.name as tax_name, tr.rate_bp as tax_rate_bp, t.tax_cents, t.total_cents, t.balance_cents, t.memo, t.status
+            t.expires_on, t.subtotal_cents, t.discount_cents, tr.name as tax_name, tr.rate_bp as tax_rate_bp, t.tax_cents, t.total_cents, t.balance_cents, t.memo, t.status
      from transactions t
      join companies co on co.id = t.company_id
      join contacts c on c.id = t.contact_id
@@ -49,7 +50,7 @@ export async function loadPdfDoc(companyId: string, id: string, type: string): P
     title: TITLE[type],
     number: r.number,
     date: r.txn_date,
-    dueDate: isInvoice ? r.due_date : null,
+    dueDate: isInvoice ? r.due_date : type === "estimate" ? r.expires_on : null,
     terms: isInvoice ? r.terms : null,
     company: { name: r.company_name, address: r.company_address ?? {}, email: r.company_email, phone: r.company_phone },
     customer: { name: r.customer_name, address: r.customer_address ?? {} },

@@ -20,7 +20,15 @@ import { ApplyCredits } from "@/components/apply-credits";
 import { Attachments } from "@/components/attachments";
 import { TrackingHeader, type Tracking } from "@/components/tracking-fields";
 
-export type PurchaseKind = "expense" | "check" | "bill" | "vendor_credit" | "credit_card_credit";
+export type PurchaseKind = "expense" | "check" | "bill" | "vendor_credit" | "credit_card_credit" | "purchase_order";
+
+export interface PurchasePrefill {
+  contactId: string;
+  linkedFromId: string;
+  lines: PurchaseDetail["lines"];
+  memo: string | null;
+  note: string;
+}
 
 const KIND: Record<PurchaseKind, { title: string; noun: string; path: string; payee: string; vendorOnly: boolean; money: string | null; numberLabel: string; dateLabel: string }> = {
   expense: { title: "Expense", noun: "expense", path: "expenses", payee: "Payee", vendorOnly: false, money: "Payment account", numberLabel: "Ref no.", dateLabel: "Payment date" },
@@ -28,6 +36,7 @@ const KIND: Record<PurchaseKind, { title: string; noun: string; path: string; pa
   bill: { title: "Bill", noun: "bill", path: "bills", payee: "Vendor", vendorOnly: true, money: null, numberLabel: "Bill no.", dateLabel: "Bill date" },
   vendor_credit: { title: "Vendor credit", noun: "vendor credit", path: "vendor-credits", payee: "Vendor", vendorOnly: true, money: null, numberLabel: "Ref no.", dateLabel: "Credit date" },
   credit_card_credit: { title: "Credit card credit", noun: "credit card credit", path: "card-credits", payee: "Payee", vendorOnly: false, money: "Credit card", numberLabel: "Ref no.", dateLabel: "Date" },
+  purchase_order: { title: "Purchase order", noun: "purchase order", path: "purchase-orders", payee: "Vendor", vendorOnly: true, money: null, numberLabel: "PO no.", dateLabel: "PO date" },
 };
 
 const METHODS = ["Credit card", "Debit card", "ACH / bank transfer", "Check", "Cash", "Other"];
@@ -44,12 +53,16 @@ interface Props {
   presetVendorId?: string;
   tracking: Tracking;
   customers: { id: string; display_name: string }[];
+  prefill?: PurchasePrefill | null;
 }
 
 export function PurchaseForm(props: Props) {
   const { kind, companyId, today, initial } = props;
   const K = KIND[kind];
   const isBill = kind === "bill";
+  const isPo = kind === "purchase_order";
+  const prefill = initial ? null : props.prefill ?? null;
+  const linkedFromId = initial?.linked_from_id ?? prefill?.linkedFromId ?? null;
   const base = `/c/${companyId}/${K.path}`;
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -59,19 +72,19 @@ export function PurchaseForm(props: Props) {
   const [closePassword, setClosePassword] = useState<string | null>(null);
 
   const defaultTerms = props.terms.find((t) => t.name === "Net 30")?.id ?? null;
-  const [contactId, setContactId] = useState<string | null>(initial?.contact_id ?? props.presetVendorId ?? null);
+  const [contactId, setContactId] = useState<string | null>(initial?.contact_id ?? prefill?.contactId ?? props.presetVendorId ?? null);
   const [accountId, setAccountId] = useState(initial?.account_id ?? props.moneyAccounts[0]?.id ?? "");
   const [txnDate, setTxnDate] = useState(initial?.txn_date ?? today);
   const [termsId, setTermsId] = useState<string | null>(initial ? initial.terms_id : defaultTerms);
   const [dueDate, setDueDate] = useState(initial?.due_date ?? addDays(today, 30));
   const [number, setNumber] = useState(initial?.number ?? "");
   const [method, setMethod] = useState(initial?.payment_method ?? "Credit card");
-  const [memo, setMemo] = useState(initial?.memo ?? "");
+  const [memo, setMemo] = useState(initial?.memo ?? prefill?.memo ?? "");
   const [locationId, setLocationId] = useState<string | null>(initial?.location_id ?? null);
   const [tagIds, setTagIds] = useState<string[]>(initial?.tag_ids ?? []);
   const [lines, setLines] = useState<CategoryLine[]>(() =>
     withSpareCategories(
-      (initial?.lines ?? []).map((l, i) => ({
+      (initial?.lines ?? prefill?.lines ?? []).map((l, i) => ({
         key: 100000 + i,
         accountId: l.account_id,
         description: l.description ?? "",
@@ -130,6 +143,7 @@ export function PurchaseForm(props: Props) {
           memo: memo || null,
           locationId,
           tagIds,
+          linkedFromId,
           lines: filled.map((l) => ({
             accountId: l.accountId,
             description: l.description || null,
@@ -173,6 +187,7 @@ export function PurchaseForm(props: Props) {
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-semibold">{initial ? `${K.title}${initial.number ? ` ${initial.number}` : ""}` : `New ${K.noun}`}</h1>
           {voided && <StatusPill tone="voided">Voided</StatusPill>}
+          {!voided && isPo && initial && (initial.doc_status === "closed" ? <StatusPill tone="paid">Closed</StatusPill> : <StatusPill tone="open">Open</StatusPill>)}
           {!voided && isBill && initial && (initial.balance_cents === 0 ? <StatusPill tone="paid">Paid</StatusPill> : paid > 0 ? <StatusPill tone="partial">Partially paid</StatusPill> : <StatusPill tone="open">Open</StatusPill>)}
         </div>
         <Link href={`/c/${companyId}/expenses`} className="rounded-sm p-1 text-text-muted hover:bg-row-hover" aria-label="Close">
@@ -273,6 +288,11 @@ export function PurchaseForm(props: Props) {
           </div>
         </div>
 
+        {prefill && (
+          <p role="status" className="mt-4 rounded-md bg-info-soft px-3 py-2 text-on-info-soft">
+            {prefill.note}
+          </p>
+        )}
         <TrackingHeader tracking={props.tracking} locationId={locationId} onLocation={setLocationId} tagIds={tagIds} onTags={setTagIds} />
         {filled.some((l) => l.billable && !l.customerId) && (
           <p className="mt-4 text-sm text-warning">Choose a customer for each billable line, or it won&apos;t show up to bill.</p>
@@ -283,7 +303,7 @@ export function PurchaseForm(props: Props) {
             onChange={setLines}
             accounts={props.categories}
             classes={props.tracking.classes}
-            customers={kind === "vendor_credit" || kind === "credit_card_credit" ? undefined : props.customers}
+            customers={kind === "vendor_credit" || kind === "credit_card_credit" || isPo ? undefined : props.customers}
           />
         </div>
 
@@ -316,6 +336,11 @@ export function PurchaseForm(props: Props) {
             <Link href={`/c/${companyId}/expenses`}>Cancel</Link>
           </Button>
           {initial && <TxnMoreMenu companyId={companyId} txnId={initial.id} label={K.noun} voided={voided} afterDelete={`/c/${companyId}/expenses`} />}
+          {isPo && initial && !voided && initial.doc_status !== "closed" && (
+            <Button asChild variant="ghost">
+              <Link href={`/c/${companyId}/bills/new?fromPo=${initial.id}`}>Create bill</Link>
+            </Button>
+          )}
           {isBill && initial && initial.balance_cents > 0 && !voided && (
             <Button asChild variant="ghost">
               <Link href={`/c/${companyId}/bills/pay?vendor=${initial.contact_id}`}>Pay bill</Link>

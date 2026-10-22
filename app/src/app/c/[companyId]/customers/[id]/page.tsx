@@ -6,7 +6,7 @@ import { one, query } from "@/db";
 import { requireCompany } from "@/lib/authz";
 import { formatDate } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
-import { listTaxRates, listTerms } from "@/lib/queries";
+import { listCustomerOptions, listTaxRates, listTerms } from "@/lib/queries";
 import { TXN_LABEL, txnHref } from "@/lib/routes";
 import { EditCustomerButton } from "./edit-customer";
 
@@ -24,15 +24,18 @@ export default async function CustomerPage({ params }: { params: Promise<{ compa
     notes: string | null;
     tax_exempt: boolean;
     default_tax_rate_id: string | null;
+    parent_id: string | null;
+    parent_name: string | null;
     open_cents: number;
   }>(
-    `select c.display_name, c.company_name, c.emails[1] as email, c.phone, c.terms_id, c.billing_address, c.notes, c.tax_exempt, c.default_tax_rate_id,
+    `select c.display_name, c.company_name, c.emails[1] as email, c.phone, c.terms_id, c.billing_address, c.notes, c.tax_exempt, c.default_tax_rate_id, c.parent_id, (select p.display_name from contacts p where p.id = c.parent_id) as parent_name,
             coalesce((select sum(balance_cents) from transactions t where t.contact_id = c.id and t.type = 'invoice' and t.status = 'posted'), 0) as open_cents
      from contacts c where c.company_id = $1 and c.id = $2 and c.kind = 'customer'`,
     [companyId, id],
   );
   if (!c) notFound();
-  const [terms, taxRates] = await Promise.all([listTerms(companyId), listTaxRates(companyId)]);
+  const [terms, taxRates, allCustomers] = await Promise.all([listTerms(companyId), listTaxRates(companyId), listCustomerOptions(companyId)]);
+  const subs = allCustomers.filter((x) => x.parent_id === id);
   const txns = await query<{ id: string; type: string; number: string | null; txn_date: string; total_cents: number; balance_cents: number; status: string }>(
     `select id, type, number, txn_date, total_cents, balance_cents, status from transactions
      where company_id = $1 and contact_id = $2 order by txn_date desc, created_at desc limit 200`,
@@ -48,6 +51,27 @@ export default async function CustomerPage({ params }: { params: Promise<{ compa
           </Link>
           <h1 className="mt-1 text-xl font-bold">{c.display_name}</h1>
           <p className="text-text-muted">{[c.company_name, c.email, c.phone].filter(Boolean).join(" · ")}</p>
+          {c.parent_id && (
+            <p className="text-sm text-text-muted">
+              Sub-customer of{" "}
+              <Link className="text-accent hover:underline" href={`${base}/customers/${c.parent_id}`}>
+                {c.parent_name}
+              </Link>
+            </p>
+          )}
+          {subs.length > 0 && (
+            <p className="text-sm text-text-muted">
+              Sub-customers:{" "}
+              {subs.map((x, i) => (
+                <span key={x.id}>
+                  {i > 0 && ", "}
+                  <Link className="text-accent hover:underline" href={`${base}/customers/${x.id}`}>
+                    {x.display_name}
+                  </Link>
+                </span>
+              ))}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-4">
           <div className="text-right">
@@ -58,6 +82,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ compa
             companyId={companyId}
             terms={terms}
             taxRates={taxRates}
+            parents={allCustomers}
             customer={{
               id,
               displayName: c.display_name,
@@ -69,6 +94,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ compa
               notes: c.notes ?? undefined,
               taxExempt: c.tax_exempt,
               defaultTaxRateId: c.default_tax_rate_id ?? undefined,
+              parentId: c.parent_id ?? undefined,
             }}
           />
           <Button asChild>

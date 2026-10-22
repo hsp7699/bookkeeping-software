@@ -19,6 +19,7 @@ const TYPES = [
   ["bill_payment", "Bill payments"],
   ["vendor_credit", "Vendor credits"],
   ["credit_card_credit", "Card credits"],
+  ["purchase_order", "Purchase orders"],
 ] as const;
 
 export default async function ExpensesPage({ params, searchParams }: { params: Promise<{ companyId: string }>; searchParams: Promise<{ type?: string }> }) {
@@ -37,16 +38,18 @@ export default async function ExpensesPage({ params, searchParams }: { params: P
     total_cents: number;
     balance_cents: number;
     status: string;
+    doc_status: string | null;
     overdue_days: number | null;
   }>(
     `with today as (select (now() at time zone timezone)::date as d from companies where id = $1)
      select t.id, t.type, t.number, t.txn_date, c.display_name as payee,
             case when (select count(*) from transaction_lines l where l.transaction_id = t.id) > 1 then '-Split-'
                  else (select a.name from transaction_lines l join accounts a on a.id = l.account_id where l.transaction_id = t.id limit 1) end as category,
-            pa.name as account, t.total_cents, t.balance_cents, t.status,
+            pa.name as account, t.total_cents, t.balance_cents, t.status, t.doc_status,
             case when t.type = 'bill' and t.balance_cents > 0 and t.due_date < (select d from today) then (select d from today) - t.due_date end as overdue_days
      from transactions t left join contacts c on c.id = t.contact_id left join accounts pa on pa.id = t.account_id
-     where t.company_id = $1 and t.type in ('expense','check','bill','bill_payment','vendor_credit','credit_card_credit') and ($2 = 'all' or t.type = $2)
+     where t.company_id = $1 and t.type in ('expense','check','bill','bill_payment','vendor_credit','credit_card_credit','purchase_order')
+       and (($2 = 'all' and t.type <> 'purchase_order') or t.type = $2)
      order by t.txn_date desc, t.created_at desc limit 500`,
     [companyId, type],
   );
@@ -114,6 +117,8 @@ export default async function ExpensesPage({ params, searchParams }: { params: P
                   <Td>
                     {r.status === "voided" ? (
                       <StatusPill tone="voided">Voided</StatusPill>
+                    ) : r.type === "purchase_order" ? (
+                      r.doc_status === "closed" ? <StatusPill tone="paid">Closed</StatusPill> : <StatusPill tone="open">Open</StatusPill>
                     ) : r.type === "bill" ? (
                       r.balance_cents === 0 ? (
                         <StatusPill tone="paid">Paid</StatusPill>

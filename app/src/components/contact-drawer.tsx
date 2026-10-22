@@ -12,6 +12,7 @@ export interface CustomerDraft {
   taxId?: string;
   taxExempt?: boolean;
   defaultTaxRateId?: string;
+  parentId?: string;
   displayName: string;
   companyName?: string;
   email?: string;
@@ -29,10 +30,12 @@ interface Props {
   initial?: CustomerDraft;
   terms: { id: string; name: string }[];
   taxRates?: { id: string; name: string }[];
+  /** customers that can be a parent (sub-customers) */
+  parents?: { id: string; display_name: string }[];
   onSaved?: (c: { id: string; displayName: string; email: string | null; termsId: string | null }) => void;
 }
 
-export function CustomerDrawer({ kind = "customer", companyId, open, onOpenChange, initial, terms, taxRates = [], onSaved }: Props) {
+export function CustomerDrawer({ kind = "customer", companyId, open, onOpenChange, initial, terms, taxRates = [], parents = [], onSaved }: Props) {
   const noun = kind === "customer" ? "customer" : "vendor";
   const [pending, start] = useTransition();
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -48,6 +51,7 @@ export function CustomerDrawer({ kind = "customer", companyId, open, onOpenChang
       taxId: s("taxId"),
       taxExempt: f.get("taxExempt") === "on",
       defaultTaxRateId: s("defaultTaxRateId"),
+      parentId: s("parentId"),
       displayName: s("displayName"),
       companyName: s("companyName"),
       email: s("email"),
@@ -141,6 +145,22 @@ export function CustomerDrawer({ kind = "customer", companyId, open, onOpenChang
             <Input name="zip" aria-label="ZIP code" placeholder="ZIP" defaultValue={a.zip} />
           </div>
         </fieldset>
+        {kind === "customer" && parents.filter((x) => x.id !== initial?.id).length > 0 && (
+          <Field label="Sub-customer of" hint="For a project, job or branch of another customer. Its invoices still go to its own name.">
+            {(p) => (
+              <NativeSelect {...p} name="parentId" defaultValue={initial?.parentId ?? ""}>
+                <option value="">Not a sub-customer</option>
+                {parents
+                  .filter((x) => x.id !== initial?.id)
+                  .map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.display_name}
+                    </option>
+                  ))}
+              </NativeSelect>
+            )}
+          </Field>
+        )}
         {kind === "customer" && (
           <div className="grid grid-cols-2 items-end gap-4">
             <Field label="Default sales tax">

@@ -10,6 +10,7 @@ export async function companyToday(companyId: string): Promise<string> {
 
 export interface CustomerRow {
   id: string;
+  parent_id: string | null;
   display_name: string;
   company_name: string | null;
   email: string | null;
@@ -21,7 +22,7 @@ export interface CustomerRow {
 export function listCustomers(companyId: string, filter: "all" | "open" | "overdue" = "all") {
   return query<CustomerRow>(
     `with today as (select (now() at time zone timezone)::date as d from companies where id = $1)
-     select c.id, c.display_name, c.company_name, c.emails[1] as email, c.phone,
+     select c.id, c.parent_id, c.display_name, c.company_name, c.emails[1] as email, c.phone,
             coalesce(sum(t.balance_cents) filter (where t.type = 'invoice'), 0) as open_cents,
             coalesce(sum(t.balance_cents) filter (where t.type = 'invoice' and t.due_date < (select d from today)), 0) as overdue_cents
      from contacts c

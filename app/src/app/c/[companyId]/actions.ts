@@ -40,6 +40,7 @@ const contactSchema = z.object({
   taxId: z.string().trim().max(20).optional(),
   taxExempt: z.boolean().optional(),
   defaultTaxRateId: z.union([z.literal(""), z.string().uuid()]).optional(),
+  parentId: z.union([z.literal(""), z.string().uuid()]).optional(),
 });
 
 export async function saveContactAction(companyId: string, raw: unknown): Promise<ActionResult<{ id: string; displayName: string; email: string | null; termsId: string | null }>> {
@@ -53,16 +54,26 @@ export async function saveContactAction(companyId: string, raw: unknown): Promis
       [companyId, c.displayName, c.id ?? null],
     );
     if (dupe) return { ok: false, error: "Check the highlighted fields.", fieldErrors: { displayName: `A ${dupe.kind} with this name already exists. Names must be unique.` } };
-    const params = [companyId, c.kind, c.displayName, c.companyName || null, c.email ? [c.email] : [], c.phone || null, c.termsId || null, JSON.stringify(c.billingAddress), c.notes || null, c.track1099 ?? false, c.taxId || null, c.taxExempt ?? false, c.defaultTaxRateId || null];
+    if (c.parentId) {
+      // the parent must be a customer, and not this customer or one of its own sub-customers
+      const ok = await one<{ ok: boolean }>(
+        `with recursive up as (select id, parent_id from contacts where id = $2 and company_id = $1 and kind = 'customer'
+                               union all select c.id, c.parent_id from contacts c join up on c.id = up.parent_id)
+         select (select count(*) from up) > 0 and not exists (select 1 from up where id = $3::uuid) as ok`,
+        [companyId, c.parentId, c.id ?? null],
+      );
+      if (!ok?.ok) return { ok: false, error: "Check the highlighted fields.", fieldErrors: { parentId: "Pick a different parent customer." } };
+    }
+    const params = [companyId, c.kind, c.displayName, c.companyName || null, c.email ? [c.email] : [], c.phone || null, c.termsId || null, JSON.stringify(c.billingAddress), c.notes || null, c.track1099 ?? false, c.taxId || null, c.taxExempt ?? false, c.defaultTaxRateId || null, c.kind === "customer" ? c.parentId || null : null];
     const row = c.id
       ? await one<{ id: string }>(
-          `update contacts set kind = $2, display_name = $3, company_name = $4, emails = $5, phone = $6, terms_id = $7, billing_address = $8, notes = $9, track_1099 = $10, tax_id = $11, tax_exempt = $12, default_tax_rate_id = $13
-           where company_id = $1 and id = $14 returning id`,
+          `update contacts set kind = $2, display_name = $3, company_name = $4, emails = $5, phone = $6, terms_id = $7, billing_address = $8, notes = $9, track_1099 = $10, tax_id = $11, tax_exempt = $12, default_tax_rate_id = $13, parent_id = $14
+           where company_id = $1 and id = $15 returning id`,
           [...params, c.id],
         )
       : await one<{ id: string }>(
-          `insert into contacts (company_id, kind, display_name, company_name, emails, phone, terms_id, billing_address, notes, track_1099, tax_id, tax_exempt, default_tax_rate_id)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning id`,
+          `insert into contacts (company_id, kind, display_name, company_name, emails, phone, terms_id, billing_address, notes, track_1099, tax_id, tax_exempt, default_tax_rate_id, parent_id)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning id`,
           params,
         );
     if (!row) return { ok: false, error: "That record no longer exists." };
@@ -196,4 +207,26 @@ export async function deleteTransactionAction(companyId: string, id: string, clo
   } catch (e) {
     return fail(e);
   }
+}
+
+/** Unbilled billable expense lines for a customer, and the income account billed expenses go to. */
+export async function listBillableAction(companyId: string, contactId: string) {
+  await requireCompany(companyId, "standard");
+  const lines = await query<{ line_id: string; txn_id: string; txn_date: string; description: string | null; account: string; amount_cents: number }>(
+    `select l.id as line_id, t.id as txn_id, t.txn_date, l.description, a.name as account, l.amount_cents
+     from transaction_lines l join transactions t on t.id = l.transaction_id join accounts a on a.id = l.account_id
+     where t.company_id = $1 and l.contact_id = $2 and l.billable and l.billed_line_id is null and t.status = 'posted'
+       and t.type in ('expense','check','bill')
+     order by t.txn_date`,
+    [companyId, contactId],
+  );
+  let acct = await one<{ id: string }>("select id from accounts where company_id = $1 and lower(name) = 'billable expense income'", [companyId]);
+  if (!acct && lines.length) {
+    acct = await one<{ id: string }>(
+      `insert into accounts (company_id, name, type, detail_type) values ($1, 'Billable Expense Income', 'income', 'other_primary_income')
+       on conflict do nothing returning id`,
+      [companyId],
+    );
+  }
+  return { lines, incomeAccountId: acct?.id ?? null };
 }

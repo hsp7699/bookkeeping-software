@@ -3,6 +3,7 @@
 import {
   BarChart3,
   BookOpen,
+  ClipboardList,
   FileText,
   History,
   Home,
@@ -36,6 +37,7 @@ const groups: { label?: string; items: Item[] }[] = [
     items: [
       { href: "/sales", label: "Sales transactions", icon: ListChecks },
       { href: "/invoices", label: "Invoices", icon: FileText },
+      { href: "/estimates", label: "Estimates", icon: ClipboardList },
       { href: "/customers", label: "Customers", icon: Users },
       { href: "/items", label: "Products & services", icon: Package },
     ],

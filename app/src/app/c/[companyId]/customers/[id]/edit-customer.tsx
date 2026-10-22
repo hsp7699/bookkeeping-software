@@ -10,18 +10,20 @@ export function EditCustomerButton({
   customer,
   terms,
   taxRates,
+  parents,
 }: {
   companyId: string;
   customer: CustomerDraft;
   terms: { id: string; name: string }[];
   taxRates: { id: string; name: string }[];
+  parents: { id: string; display_name: string }[];
 }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
   return (
     <>
       <Button onClick={() => setOpen(true)}>Edit</Button>
-      <CustomerDrawer companyId={companyId} open={open} onOpenChange={setOpen} initial={customer} terms={terms} taxRates={taxRates} onSaved={() => router.refresh()} />
+      <CustomerDrawer companyId={companyId} open={open} onOpenChange={setOpen} initial={customer} terms={terms} taxRates={taxRates} parents={parents} onSaved={() => router.refresh()} />
     </>
   );
 }

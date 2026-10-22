@@ -18,7 +18,7 @@ import { Attachments } from "@/components/attachments";
 import { ClassSelect, TrackingHeader, type Tracking } from "@/components/tracking-fields";
 import { TxnMoreMenu } from "@/components/txn-more-menu";
 import { EmailInvoiceDialog } from "./email-dialog";
-import { saveTransactionAction } from "../actions";
+import { listBillableAction, saveTransactionAction } from "../actions";
 import { CustomerDrawer } from "@/components/contact-drawer";
 import { ItemDrawer, type SavedItem } from "../items/item-drawer";
 
@@ -33,14 +33,34 @@ interface ItemOption {
   sales_price_cents: number | null;
   taxable: boolean;
 }
-export type SalesKind = "invoice" | "sales_receipt" | "credit_memo" | "refund_receipt";
+export type SalesKind = "invoice" | "sales_receipt" | "credit_memo" | "refund_receipt" | "estimate";
 
 const KIND: Record<SalesKind, { title: string; noun: string; path: string; numberLabel: string; big: string; dateLabel: string }> = {
   invoice: { title: "Invoice", noun: "invoice", path: "invoices", numberLabel: "Invoice no.", big: "Balance due", dateLabel: "Invoice date" },
   sales_receipt: { title: "Sales receipt", noun: "sales receipt", path: "sales-receipts", numberLabel: "Receipt no.", big: "Amount", dateLabel: "Sale date" },
   credit_memo: { title: "Credit memo", noun: "credit memo", path: "credit-memos", numberLabel: "Credit no.", big: "Credit amount", dateLabel: "Credit date" },
   refund_receipt: { title: "Refund receipt", noun: "refund", path: "refunds", numberLabel: "Refund no.", big: "Refund amount", dateLabel: "Refund date" },
+  estimate: { title: "Estimate", noun: "estimate", path: "estimates", numberLabel: "Estimate no.", big: "Total", dateLabel: "Estimate date" },
 };
+
+export interface SalesPrefill {
+  contactId: string;
+  linkedFromId: string;
+  taxRateId: string | null;
+  discountCents: number;
+  memo: string | null;
+  lines: InvoiceDetail["lines"];
+  note: string;
+}
+
+interface Billable {
+  line_id: string;
+  txn_id: string;
+  txn_date: string;
+  description: string | null;
+  account: string;
+  amount_cents: number;
+}
 
 const METHODS = ["Check", "ACH / bank transfer", "Credit card", "Cash", "Other"];
 
@@ -58,10 +78,13 @@ interface Props {
   initial: InvoiceDetail | null;
   presetCustomerId?: string;
   tracking: Tracking;
+  prefill?: SalesPrefill | null;
 }
 
 interface Line {
   key: number;
+  /** lines that bill an expense have an income account instead of a product */
+  accountId: string | null;
   classId: string | null;
   /** bills this billable expense line */
   billsLineId: string | null;
@@ -74,10 +97,10 @@ interface Line {
 }
 
 let keySeq = 0;
-const blank = (): Line => ({ key: ++keySeq, classId: null, billsLineId: null, itemId: null, description: "", qty: null, rateCents: null, amountCents: null, taxable: false });
+const blank = (): Line => ({ key: ++keySeq, accountId: null, classId: null, billsLineId: null, itemId: null, description: "", qty: null, rateCents: null, amountCents: null, taxable: false });
 
 function isEmpty(l: Line) {
-  return !l.itemId && !l.description && !l.amountCents;
+  return !l.itemId && !l.accountId && !l.description && !l.amountCents;
 }
 
 /** Keep two empty rows at the end, like a spreadsheet. */
@@ -96,6 +119,8 @@ export function SalesForm(props: Props) {
   const { companyId, today, initial, kind } = props;
   const K = KIND[kind];
   const isInvoice = kind === "invoice";
+  const isEstimate = kind === "estimate";
+  const prefill = initial ? null : props.prefill ?? null;
   const hasMoneyAccount = kind === "sales_receipt" || kind === "refund_receipt";
   const base = `/c/${companyId}/${K.path}`;
   const router = useRouter();
@@ -107,15 +132,20 @@ export function SalesForm(props: Props) {
   const [itemDrawer, setItemDrawer] = useState<{ name: string; lineKey: number } | null>(null);
 
   const defaultTerms = props.terms.find((t) => t.name === "Net 30")?.id ?? props.terms[0]?.id ?? null;
-  const [contactId, setContactId] = useState<string | null>(initial?.contact_id ?? props.presetCustomerId ?? null);
+  const [contactId, setContactId] = useState<string | null>(initial?.contact_id ?? prefill?.contactId ?? props.presetCustomerId ?? null);
   const [email, setEmail] = useState(initial?.email_to?.[0] ?? customers.find((c) => c.id === props.presetCustomerId)?.email ?? "");
   const [txnDate, setTxnDate] = useState(initial?.txn_date ?? today);
   const [termsId, setTermsId] = useState<string | null>(initial ? initial.terms_id : defaultTerms);
   const [dueDate, setDueDate] = useState(initial?.due_date ?? addDays(today, props.terms.find((t) => t.id === defaultTerms)?.due_days ?? 30));
   const [number, setNumber] = useState(initial?.number ?? "");
-  const [discount, setDiscount] = useState<number | null>(initial?.discount_cents || null);
-  const [taxRateId, setTaxRateId] = useState<string>(initial?.tax_rate_id ?? "");
-  const [memo, setMemo] = useState(initial?.memo ?? "");
+  const [discount, setDiscount] = useState<number | null>(initial?.discount_cents || prefill?.discountCents || null);
+  const [taxRateId, setTaxRateId] = useState<string>(initial?.tax_rate_id ?? prefill?.taxRateId ?? "");
+  const [memo, setMemo] = useState(initial?.memo ?? prefill?.memo ?? "");
+  const [expiresOn, setExpiresOn] = useState(initial?.expires_on ?? addDays(today, 30));
+  const [docStatus, setDocStatus] = useState(initial?.doc_status ?? "pending");
+  const [billable, setBillable] = useState<Billable[]>([]);
+  const [billableIncomeId, setBillableIncomeId] = useState<string | null>(null);
+  const linkedFromId = initial?.linked_from_id ?? prefill?.linkedFromId ?? null;
   const [privateNote, setPrivateNote] = useState(initial?.private_note ?? "");
   const [accountId, setAccountId] = useState(initial?.account_id ?? props.moneyAccounts[0]?.id ?? "");
   const [paymentMethod, setPaymentMethod] = useState(initial?.payment_method ?? "Check");
@@ -125,8 +155,9 @@ export function SalesForm(props: Props) {
   const [emailOpen, setEmailOpen] = useState(false);
   const [lines, setLines] = useState<Line[]>(() =>
     withSpare(
-      (initial?.lines ?? []).map((l) => ({
+      (initial?.lines ?? prefill?.lines ?? []).map((l) => ({
         key: ++keySeq,
+        accountId: l.item_id ? null : l.account_id,
         classId: l.class_id,
         billsLineId: l.bills_line_id,
         itemId: l.item_id,
@@ -157,6 +188,33 @@ export function SalesForm(props: Props) {
         applyTerms(c.terms_id);
       }
     }
+  }
+
+  // Billable expenses waiting to be billed to this customer
+  useEffect(() => {
+    if (!isInvoice || !contactId) {
+      setBillable([]);
+      return;
+    }
+    let off = false;
+    listBillableAction(companyId, contactId).then((r) => {
+      if (off) return;
+      setBillable(r.lines);
+      setBillableIncomeId(r.incomeAccountId);
+    });
+    return () => {
+      off = true;
+    };
+  }, [companyId, contactId, isInvoice]);
+
+  function addBillable(b: Billable) {
+    const incomeAccountId = billableIncomeId;
+    setLines((ls) =>
+      withSpare([
+        ...ls.filter((l) => !isEmpty(l)),
+        { key: ++keySeq, accountId: incomeAccountId, classId: null, billsLineId: b.line_id, itemId: null, description: b.description || `${b.account} (${b.txn_date})`, qty: 1, rateCents: b.amount_cents, amountCents: b.amount_cents, taxable: false },
+      ]),
+    );
   }
 
   function updateLine(key: number, patch: Partial<Line>) {
@@ -196,7 +254,7 @@ export function SalesForm(props: Props) {
 
   function save(then: "close" | "new" | "stay") {
     setError(null);
-    const bad = filled.find((l) => !l.itemId);
+    const bad = filled.find((l) => !l.itemId && !l.accountId);
     if (bad) return setError(`Line ${filled.indexOf(bad) + 1}: choose a product or service.`);
     const payload = {
       type: kind,
@@ -205,6 +263,9 @@ export function SalesForm(props: Props) {
       contactId,
       txnDate,
       dueDate: isInvoice ? dueDate : null,
+      expiresOn: isEstimate ? expiresOn : null,
+      docStatus: isEstimate && docStatus !== "closed" ? docStatus : undefined,
+      linkedFromId,
       termsId: isInvoice ? termsId : null,
       accountId: hasMoneyAccount ? accountId || null : null,
       paymentMethod: hasMoneyAccount ? paymentMethod : null,
@@ -215,6 +276,7 @@ export function SalesForm(props: Props) {
         classId: l.classId,
         billsLineId: l.billsLineId,
         itemId: l.itemId,
+        accountId: l.itemId ? null : l.accountId,
         description: l.description || null,
         qty: l.qty,
         rateCents: l.rateCents,
@@ -263,6 +325,10 @@ export function SalesForm(props: Props) {
   const status =
     initial?.status === "voided" ? (
       <StatusPill tone="voided">Voided</StatusPill>
+    ) : isEstimate && initial ? (
+      <StatusPill tone={initial.doc_status === "closed" ? "paid" : initial.doc_status === "rejected" ? "voided" : initial.doc_status === "accepted" ? "partial" : "open"}>
+        {{ pending: "Pending", accepted: "Accepted", rejected: "Rejected", closed: "Closed" }[initial.doc_status ?? "pending"]}
+      </StatusPill>
     ) : !isInvoice ? null : initial && initial.balance_cents === 0 ? (
       <StatusPill tone="paid">Paid</StatusPill>
     ) : initial && paid > 0 ? (
@@ -293,6 +359,31 @@ export function SalesForm(props: Props) {
               {(p) => <Input {...p} type="password" value={closePassword} onChange={(e) => setClosePassword(e.target.value)} />}
             </Field>
           </div>
+        )}
+        {prefill && (
+          <p role="status" className="mb-4 rounded-md bg-info-soft px-3 py-2 text-on-info-soft">
+            {prefill.note}
+          </p>
+        )}
+        {isInvoice && billable.some((b) => !lines.some((l) => l.billsLineId === b.line_id)) && (
+          <section aria-label="Billable expenses" className="mb-4 rounded-md border border-border bg-info-soft/40 p-4">
+            <h2 className="mb-2 font-semibold">Billable expenses for this customer</h2>
+            <ul className="flex flex-col gap-1.5">
+              {billable
+                .filter((b) => !lines.some((l) => l.billsLineId === b.line_id))
+                .map((b) => (
+                  <li key={b.line_id} className="flex flex-wrap items-center justify-between gap-2">
+                    <span>
+                      {b.txn_date} · {b.account}
+                      {b.description ? ` · ${b.description}` : ""} <span className="num font-medium">{formatCents(b.amount_cents)}</span>
+                    </span>
+                    <Button size="sm" onClick={() => addBillable(b)}>
+                      Add
+                    </Button>
+                  </li>
+                ))}
+            </ul>
+          </section>
         )}
         {initial?.status === "voided" && (
           <p className="mb-4 rounded-md bg-danger-soft px-3 py-2 text-on-danger-soft">This {K.noun} is voided. It stays in your records but doesn&apos;t affect your books.</p>
@@ -360,6 +451,21 @@ export function SalesForm(props: Props) {
                 </Field>
               </>
             )}
+            {isEstimate && (
+              <>
+                <Field label="Expiration date">{(p) => <Input {...p} type="date" value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)} />}</Field>
+                <Field label="Status">
+                  {(p) => (
+                    <NativeSelect {...p} value={docStatus} disabled={docStatus === "closed"} onChange={(e) => setDocStatus(e.target.value)}>
+                      <option value="pending">Pending</option>
+                      <option value="accepted">Accepted</option>
+                      <option value="rejected">Rejected</option>
+                      {docStatus === "closed" && <option value="closed">Closed (fully invoiced)</option>}
+                    </NativeSelect>
+                  )}
+                </Field>
+              </>
+            )}
             <Field label={K.dateLabel}>
               {(p) => (
                 <Input
@@ -411,6 +517,9 @@ export function SalesForm(props: Props) {
                   </td>
                   <td className="px-1 pt-2.5 text-text-muted">{idx + 1}</td>
                   <td className="px-1 py-1.5">
+                    {l.billsLineId || (!l.itemId && l.accountId) ? (
+                      <span className="flex h-9 items-center rounded-sm bg-surface px-2.5 text-text-muted">{l.billsLineId ? "Billable expense" : "Other income"}</span>
+                    ) : (
                     <Combobox
                       aria-label={`Line ${idx + 1} product or service`}
                       options={itemOptions}
@@ -420,6 +529,7 @@ export function SalesForm(props: Props) {
                       onAddNew={(typed) => setItemDrawer({ name: typed, lineKey: l.key })}
                       addNewLabel="Add new"
                     />
+                    )}
                   </td>
                   <td className="px-1 py-1.5">
                     <Input
@@ -583,6 +693,11 @@ export function SalesForm(props: Props) {
                 ...(isInvoice && initial.status !== "voided" ? [{ label: "Email invoice", onSelect: () => setEmailOpen(true) }] : []),
               ]}
             />
+          )}
+          {isEstimate && initial && initial.status === "posted" && initial.doc_status !== "rejected" && initial.doc_status !== "closed" && (
+            <Button asChild variant="ghost">
+              <Link href={`/c/${companyId}/invoices/new?fromEstimate=${initial.id}`}>Create invoice</Link>
+            </Button>
           )}
           {isInvoice && initial && initial.balance_cents > 0 && (
             <Button asChild variant="ghost">
