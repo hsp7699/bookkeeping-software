@@ -3,7 +3,7 @@
 import { chromium } from "@playwright/test";
 
 const out = process.argv[2] ?? ".";
-const BASE = "http://localhost:3100";
+const BASE = process.env.BASE_URL ?? "http://localhost:3100";
 const b = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? "/opt/pw-browsers/chromium" });
 const p = await b.newPage({ viewport: { width: 1360, height: 900 } });
 const errors = [];

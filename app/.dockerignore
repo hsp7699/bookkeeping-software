@@ -1,0 +1,7 @@
+node_modules
+.next
+.env*
+storage
+e2e
+test
+coverage

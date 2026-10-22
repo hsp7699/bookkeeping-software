@@ -2,6 +2,7 @@
 
 import { hash } from "@node-rs/argon2";
 import { AuthError } from "next-auth";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { signIn, signOut } from "@/auth";
@@ -9,6 +10,7 @@ import { one, query, tx } from "@/db";
 import type { EntityType } from "@/lib/coa";
 import { createCompany } from "@/lib/company";
 import { requireUser } from "@/lib/authz";
+import { rateLimit } from "@/lib/rate-limit";
 
 export type FormState = { error?: string; fieldErrors?: Record<string, string> } | undefined;
 
@@ -23,6 +25,9 @@ function fieldErrors(e: z.ZodError) {
 }
 
 export async function signUpAction(_: FormState, form: FormData): Promise<FormState> {
+  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
+  if (!rateLimit(`signup:ip:${ip}`, 5, 60 * 60 * 1000).ok) return { error: "Too many new accounts from this network. Try again later." };
+  if (process.env.ALLOW_SIGNUP === "false") return { error: "New sign-ups are turned off on this server." };
   const parsed = signUpSchema.safeParse(Object.fromEntries(form));
   if (!parsed.success) return { fieldErrors: fieldErrors(parsed.error) };
   const { name, email, password } = parsed.data;
@@ -33,9 +38,16 @@ export async function signUpAction(_: FormState, form: FormData): Promise<FormSt
 }
 
 export async function signInAction(_: FormState, form: FormData): Promise<FormState> {
+  const email = String(form.get("email") ?? "").trim().toLowerCase();
+  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
+  // 10 tries per 15 minutes per address and per IP
+  for (const key of [`signin:email:${email}`, `signin:ip:${ip}`]) {
+    const r = rateLimit(key, 10, 15 * 60 * 1000);
+    if (!r.ok) return { error: `Too many sign-in attempts. Try again in ${Math.ceil(r.retryAfterSec / 60)} minutes.` };
+  }
   try {
     await signIn("credentials", {
-      email: String(form.get("email") ?? "").trim().toLowerCase(),
+      email,
       password: String(form.get("password") ?? ""),
       redirectTo: String(form.get("next") || "/"),
     });

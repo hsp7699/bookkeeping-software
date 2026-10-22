@@ -8,7 +8,9 @@ export type Basis = "accrual" | "cash";
  * A ledger to report from, as SQL yielding (account_id, entry_date, net, transaction_id, contact_id),
  * net = debit − credit. Parameter $1 is the company id.
  *
- * Cash basis: invoices and bills count when paid. Each payment application
+ * Cash basis: invoices and bills count when paid. Credit memos and vendor
+ * credits count when applied, together with the share of the document they
+ * settle, so a credit never moves cash. Each payment application
  * brings in the document's non-A/R (non-A/P) lines scaled by amount/total, on
  * the payment date; the rounding remainder goes on the largest line so every
  * application still balances. Payments' A/R side drops out except for any
@@ -23,7 +25,7 @@ export function ledgerSql(basis: Basis): string {
     select e.account_id, e.entry_date, (e.debit_cents - e.credit_cents)::bigint as net, e.transaction_id, e.contact_id
     from ledger_entries e join transactions t on t.id = e.transaction_id join accounts a on a.id = e.account_id
     where e.company_id = $1
-      and (t.type not in ('invoice','bill','payment','bill_payment')
+      and (t.type not in ('invoice','bill','payment','bill_payment','credit_memo','vendor_credit')
            or (t.type in ('payment','bill_payment') and a.type not in ('accounts_receivable','accounts_payable')))
     union all
     select e.account_id, e.entry_date, (sign(e.debit_cents - e.credit_cents) * t.balance_cents)::bigint, e.transaction_id, e.contact_id
@@ -33,15 +35,20 @@ export function ledgerSql(basis: Basis): string {
     union all
     select x.account_id, x.pay_date, (x.v + case when x.rn = 1 then x.target - x.vsum else 0 end)::bigint, x.doc_id, x.contact_id
     from (
-      select s.*, sum(s.v) over (partition by s.app_id) as vsum
+      select s.*, sum(s.v) over (partition by s.app_id, s.doc_id) as vsum
       from (
-        select pa.id as app_id, e.account_id, p.txn_date as pay_date, d.id as doc_id, e.contact_id,
+        -- each application recognises a share of the document it pays (the invoice or bill) ...
+        -- ... and, when the source is a credit memo or vendor credit, the same share of that credit
+        select pa.id as app_id, e.account_id,
+               case when p.type in ('credit_memo','vendor_credit') then greatest(p.txn_date, d0.txn_date) else p.txn_date end as pay_date,
+               d.id as doc_id, e.contact_id,
                round((e.debit_cents - e.credit_cents)::numeric * pa.amount_cents / d.total_cents) as v,
-               row_number() over (partition by pa.id order by abs(e.debit_cents - e.credit_cents) desc, e.id) as rn,
-               case when d.type = 'invoice' then -pa.amount_cents else pa.amount_cents end as target
+               row_number() over (partition by pa.id, d.id order by abs(e.debit_cents - e.credit_cents) desc, e.id) as rn,
+               case when d.type in ('invoice','vendor_credit') then -pa.amount_cents else pa.amount_cents end as target
         from payment_applications pa
         join transactions p on p.id = pa.source_txn_id and p.status = 'posted'
-        join transactions d on d.id = pa.target_txn_id and d.total_cents <> 0
+        join transactions d0 on d0.id = pa.target_txn_id
+        join transactions d on (d.id = pa.target_txn_id or (d.id = pa.source_txn_id and p.type in ('credit_memo','vendor_credit'))) and d.total_cents <> 0
         join ledger_entries e on e.transaction_id = d.id
         join accounts a on a.id = e.account_id
         where pa.company_id = $1 and a.type not in ('accounts_receivable','accounts_payable')

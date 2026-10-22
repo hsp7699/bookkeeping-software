@@ -117,11 +117,10 @@ export async function aging(companyId: string, side: "ar" | "ap", asOf: string) 
             case
               when t.type = $3 then t.total_cents - coalesce((select sum(pa.amount_cents) from payment_applications pa join transactions p on p.id = pa.source_txn_id
                                                                where pa.target_txn_id = t.id and p.txn_date <= $2), 0)
-              when t.type = $4 then -t.balance_cents
-              else -t.total_cents end::bigint as open
+              else -t.balance_cents end::bigint as open
      from transactions t join contacts c on c.id = t.contact_id
      where t.company_id = $1 and t.status = 'posted' and t.txn_date <= $2 and t.type in ($3, $4, $5)
-       and (t.type <> $4 or t.balance_cents > 0)
+       and (t.type = $3 or t.balance_cents > 0)
      order by lower(c.display_name), t.due_date nulls last, t.txn_date`,
     [companyId, asOf, doc, pay, credit],
   );

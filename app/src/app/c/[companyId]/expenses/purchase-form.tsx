@@ -16,6 +16,7 @@ import { addDays } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 import type { PurchaseDetail } from "@/lib/queries";
 import { saveTransactionAction } from "../actions";
+import { ApplyCredits } from "@/components/apply-credits";
 import { Attachments } from "@/components/attachments";
 
 export type PurchaseKind = "expense" | "check" | "bill" | "vendor_credit" | "credit_card_credit";
@@ -256,6 +257,9 @@ export function PurchaseForm(props: Props) {
         <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_22rem]">
           <div className="flex flex-col gap-4">
             <Field label="Memo">{(p) => <Textarea {...p} value={memo} onChange={(e) => setMemo(e.target.value)} />}</Field>
+            {initial && isBill && initial.status === "posted" && initial.contact_id && (
+              <ApplyCredits companyId={companyId} docId={initial.id} contactId={initial.contact_id} side="ap" openCents={initial.balance_cents} />
+            )}
             {initial && <Attachments companyId={companyId} txnId={initial.id} />}
           </div>
           <dl className="flex flex-col gap-2 self-start">

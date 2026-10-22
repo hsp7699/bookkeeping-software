@@ -140,7 +140,8 @@ export async function refreshBalances(db: PoolClient, txnIds: string[]) {
           greatest(t.total_cents - coalesce((select sum(a.amount_cents) from payment_applications a where a.target_txn_id = t.id), 0), 0)
         when t.type in ('payment','bill_payment') then
           greatest(t.total_cents - coalesce((select sum(a.amount_cents) from payment_applications a where a.source_txn_id = t.id), 0), 0)
-        when t.type in ('credit_memo','vendor_credit') then t.total_cents
+        when t.type in ('credit_memo','vendor_credit') then
+          greatest(t.total_cents - coalesce((select sum(a.amount_cents) from payment_applications a where a.source_txn_id = t.id), 0), 0)
         else 0 end
      where t.id = any($1::uuid[])`,
     [txnIds],

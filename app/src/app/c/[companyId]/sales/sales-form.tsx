@@ -13,6 +13,7 @@ import { addDays } from "@/lib/dates";
 import { formatCents, lineAmount } from "@/lib/money";
 import { computeTotals } from "@/lib/posting";
 import type { InvoiceDetail } from "@/lib/queries";
+import { ApplyCredits } from "@/components/apply-credits";
 import { Attachments } from "@/components/attachments";
 import { TxnMoreMenu } from "@/components/txn-more-menu";
 import { EmailInvoiceDialog } from "./email-dialog";
@@ -486,6 +487,9 @@ export function SalesForm(props: Props) {
             <Field label="Note to self" hint="Only you see this.">
               {(p) => <Textarea {...p} value={privateNote} onChange={(e) => setPrivateNote(e.target.value)} />}
             </Field>
+            {initial && isInvoice && initial.status === "posted" && (
+              <ApplyCredits companyId={companyId} docId={initial.id} contactId={initial.contact_id} side="ar" openCents={initial.balance_cents} />
+            )}
             {initial && <Attachments companyId={companyId} txnId={initial.id} />}
           </div>
           <dl className="flex flex-col gap-2 self-start">

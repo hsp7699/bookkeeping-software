@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "node --env-file-if-exists=.env.local db/migrate.mjs",
     "seed:demo": "tsx --conditions=react-server --env-file=.env.local scripts/seed-demo.ts",
-    "tokens": "node scripts/gen-tokens.mjs"
+    "tokens": "node scripts/gen-tokens.mjs",
+    "e2e": "bash e2e/run-all.sh"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
