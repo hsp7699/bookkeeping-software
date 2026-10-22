@@ -112,25 +112,41 @@ export interface AccountRow {
   detail_type: string;
   system_role: string | null;
   parent_id: string | null;
+  description: string | null;
+  active: boolean;
   balance_cents: number; // in the account's natural sign
 }
 
 /** Chart of accounts with balances as of today (balance-sheet accounts only, like QBO). */
-export function listAccountsWithBalances(companyId: string) {
+export function listAccountsWithBalances(companyId: string, includeInactive = false) {
   return query<AccountRow>(
-    `select a.id, a.name, a.number, a.type, a.detail_type, a.system_role, a.parent_id,
+    `select a.id, a.name, a.number, a.type, a.detail_type, a.system_role, a.parent_id, a.description, a.active,
        case when a.type in ('income','cost_of_goods_sold','expense','other_income','other_expense') then 0
             when a.type in ('bank','accounts_receivable','other_current_asset','fixed_asset','other_asset')
               then coalesce(sum(e.debit_cents - e.credit_cents), 0)
             else coalesce(sum(e.credit_cents - e.debit_cents), 0) end as balance_cents
      from accounts a left join ledger_entries e on e.account_id = a.id
-     where a.company_id = $1 and a.active
+     where a.company_id = $1 and (a.active or $2)
      group by a.id
      order by array_position(array['bank','accounts_receivable','other_current_asset','fixed_asset','other_asset','accounts_payable',
        'credit_card','other_current_liability','long_term_liability','equity','income','cost_of_goods_sold','expense','other_income','other_expense'], a.type),
        lower(a.name)`,
-    [companyId],
+    [companyId, includeInactive],
   );
+}
+
+/** Order accounts so each sub-account follows its parent; returns depth for indenting. */
+export function asTree<T extends { id: string; parent_id: string | null }>(rows: T[]): (T & { depth: number })[] {
+  const ids = new Set(rows.map((r) => r.id));
+  const kids = new Map<string, T[]>();
+  for (const r of rows) if (r.parent_id && ids.has(r.parent_id)) kids.set(r.parent_id, [...(kids.get(r.parent_id) ?? []), r]);
+  const out: (T & { depth: number })[] = [];
+  const walk = (r: T, depth: number) => {
+    out.push({ ...r, depth });
+    for (const k of kids.get(r.id) ?? []) walk(k, depth + 1);
+  };
+  for (const r of rows) if (!r.parent_id || !ids.has(r.parent_id)) walk(r, 0);
+  return out;
 }
 
 export interface InvoiceListRow {

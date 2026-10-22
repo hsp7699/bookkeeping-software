@@ -4,6 +4,7 @@ import {
   BarChart3,
   BookOpen,
   FileText,
+  History,
   Home,
   Landmark,
   Package,
@@ -55,6 +56,7 @@ const groups: { label?: string; items: Item[] }[] = [
     items: [
       { href: "/accounts", label: "Chart of accounts", icon: BookOpen },
       { href: "/reports", label: "Reports", icon: BarChart3 },
+      { href: "/audit", label: "Audit log", icon: History },
     ],
   },
   { items: [{ href: "/settings", label: "Settings", icon: Settings, soon: true }] },

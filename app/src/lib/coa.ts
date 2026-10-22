@@ -147,3 +147,36 @@ export const DEFAULT_TERMS = [
   { name: "Net 30", dueDays: 30 },
   { name: "Net 60", dueDays: 60 },
 ];
+
+/** Detail types offered per account type (stored as snake_case). */
+export const DETAIL_TYPES: Record<AccountType, string[]> = {
+  bank: ["checking", "savings", "money_market", "cash_on_hand", "trust_account"],
+  accounts_receivable: ["accounts_receivable"],
+  other_current_asset: ["undeposited_funds", "prepaid_expenses", "inventory", "loans_to_others", "employee_cash_advances", "other_current_assets"],
+  fixed_asset: ["machinery_and_equipment", "vehicles", "furniture_and_fixtures", "buildings", "land", "leasehold_improvements", "accumulated_depreciation", "other_fixed_assets"],
+  other_asset: ["security_deposits", "goodwill", "accumulated_amortization", "other_long_term_assets"],
+  accounts_payable: ["accounts_payable"],
+  credit_card: ["credit_card"],
+  other_current_liability: ["sales_tax_payable", "payroll_liabilities", "line_of_credit", "loan_payable", "accrued_liabilities", "other_current_liabilities"],
+  long_term_liability: ["notes_payable", "shareholder_notes_payable", "other_long_term_liabilities"],
+  equity: ["owners_equity", "partner_contributions", "partner_distributions", "common_stock", "opening_balance_equity", "retained_earnings"],
+  income: ["service_fee_income", "sales_of_product_income", "discounts_refunds_given", "other_primary_income"],
+  cost_of_goods_sold: ["supplies_materials_cogs", "cost_of_labor_cogs", "shipping_freight_delivery_cogs", "other_costs_of_service_cogs"],
+  expense: [
+    "advertising_promotional", "auto", "bank_charges", "cost_of_labor", "dues_subscriptions", "entertainment_meals", "equipment_rental",
+    "insurance", "interest_paid", "legal_professional_fees", "office_general_admin", "payroll_expenses", "rent_or_lease_of_buildings",
+    "repair_maintenance", "shipping_freight_delivery", "supplies_materials", "taxes_paid", "travel", "utilities", "other_miscellaneous_service_cost",
+  ],
+  other_income: ["interest_earned", "dividend_income", "other_miscellaneous_income", "gain_loss_on_sale_of_assets"],
+  other_expense: ["depreciation", "amortization", "penalties_settlements", "other_miscellaneous_expense"],
+};
+
+export function humanize(snake: string): string {
+  const s = snake.replaceAll("_", " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+export const BALANCE_SHEET_TYPES: ReadonlySet<AccountType> = new Set([
+  "bank", "accounts_receivable", "other_current_asset", "fixed_asset", "other_asset",
+  "accounts_payable", "credit_card", "other_current_liability", "long_term_liability", "equity",
+]);
