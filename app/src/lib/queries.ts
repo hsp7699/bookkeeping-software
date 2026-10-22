@@ -226,3 +226,94 @@ export function getSalesDoc(companyId: string, id: string, type: string) {
     [companyId, id, type],
   );
 }
+
+export function listContactOptions(companyId: string, kinds: ("customer" | "vendor" | "employee" | "other")[]) {
+  return query<{ id: string; display_name: string; kind: string; email: string | null; terms_id: string | null; default_account_id: string | null }>(
+    `select id, display_name, kind, emails[1] as email, terms_id, default_account_id from contacts
+     where company_id = $1 and active and kind = any($2::text[]) order by lower(display_name)`,
+    [companyId, kinds],
+  );
+}
+
+export interface VendorRow {
+  id: string;
+  display_name: string;
+  company_name: string | null;
+  email: string | null;
+  phone: string | null;
+  open_cents: number;
+  overdue_cents: number;
+}
+
+export function listVendors(companyId: string, filter: "all" | "open" | "overdue" = "all") {
+  return query<VendorRow>(
+    `with today as (select (now() at time zone timezone)::date as d from companies where id = $1)
+     select c.id, c.display_name, c.company_name, c.emails[1] as email, c.phone,
+            coalesce(sum(t.balance_cents) filter (where t.type = 'bill'), 0) as open_cents,
+            coalesce(sum(t.balance_cents) filter (where t.type = 'bill' and t.due_date < (select d from today)), 0) as overdue_cents
+     from contacts c
+     left join transactions t on t.contact_id = c.id and t.status = 'posted' and t.balance_cents > 0
+     where c.company_id = $1 and c.kind = 'vendor' and c.active
+     group by c.id
+     having $2 = 'all'
+         or ($2 = 'open' and coalesce(sum(t.balance_cents) filter (where t.type = 'bill'), 0) > 0)
+         or ($2 = 'overdue' and coalesce(sum(t.balance_cents) filter (where t.type = 'bill' and t.due_date < (select d from today)), 0) > 0)
+     order by lower(c.display_name)`,
+    [companyId, filter],
+  );
+}
+
+export function vendorMoneyBar(companyId: string) {
+  return one<{ overdue_count: number; overdue_cents: number; open_count: number; open_cents: number; paid_count: number; paid_cents: number }>(
+    `with today as (select (now() at time zone timezone)::date as d from companies where id = $1)
+     select
+       count(*) filter (where type = 'bill' and balance_cents > 0 and due_date < (select d from today))::int as overdue_count,
+       coalesce(sum(balance_cents) filter (where type = 'bill' and balance_cents > 0 and due_date < (select d from today)), 0) as overdue_cents,
+       count(*) filter (where type = 'bill' and balance_cents > 0)::int as open_count,
+       coalesce(sum(balance_cents) filter (where type = 'bill' and balance_cents > 0), 0) as open_cents,
+       count(*) filter (where type in ('bill_payment','expense','check') and txn_date >= (select d from today) - 30)::int as paid_count,
+       coalesce(sum(total_cents) filter (where type in ('bill_payment','expense','check') and txn_date >= (select d from today) - 30), 0) as paid_cents
+     from transactions where company_id = $1 and status = 'posted'`,
+    [companyId],
+  );
+}
+
+export interface PurchaseDetail {
+  id: string;
+  type: string;
+  contact_id: string | null;
+  account_id: string | null;
+  txn_date: string;
+  due_date: string | null;
+  terms_id: string | null;
+  number: string | null;
+  payment_method: string | null;
+  memo: string | null;
+  total_cents: number;
+  balance_cents: number;
+  status: string;
+  updated_at: string;
+  lines: { account_id: string | null; description: string | null; amount_cents: number; contact_id: string | null }[];
+}
+
+export function getPurchaseDoc(companyId: string, id: string, type: string) {
+  return one<PurchaseDetail>(
+    `select t.id, t.type, t.contact_id, t.account_id, t.txn_date, t.due_date, t.terms_id, t.number, t.payment_method, t.memo,
+            t.total_cents, t.balance_cents, t.status, t.updated_at::text as updated_at,
+            coalesce((select json_agg(json_build_object('account_id', l.account_id, 'description', l.description, 'amount_cents', l.amount_cents,
+               'contact_id', l.contact_id) order by l.position) from transaction_lines l where l.transaction_id = t.id), '[]') as lines
+     from transactions t where t.company_id = $1 and t.id = $2 and t.type = $3`,
+    [companyId, id, type],
+  );
+}
+
+/** Categories for expense lines: anything but A/R, A/P and the bank-side accounts. */
+export function listCategoryAccounts(companyId: string) {
+  return query<{ id: string; name: string; type: AccountType; parent_id: string | null }>(
+    `select id, name, type, parent_id from accounts where company_id = $1 and active
+       and type not in ('accounts_receivable','accounts_payable')
+     order by array_position(array['expense','cost_of_goods_sold','other_expense','income','other_income','fixed_asset','other_asset',
+       'other_current_asset','other_current_liability','long_term_liability','equity','credit_card','bank'], type), lower(name)`,
+    [companyId],
+  );
+}

@@ -11,7 +11,14 @@ const columns: { label: string; items: { label: string; href?: string }[] }[] = 
     label: "Customers",
     items: [{ label: "Invoice", href: "/invoices/new" }, { label: "Receive payment", href: "/payments/new" }, { label: "Sales receipt", href: "/sales-receipts/new" }, { label: "Credit memo", href: "/credit-memos/new" }, { label: "Refund receipt", href: "/refunds/new" }],
   },
-  { label: "Vendors", items: [{ label: "Expense" }, { label: "Check" }, { label: "Bill" }, { label: "Pay bills" }] },
+  { label: "Vendors", items: [
+      { label: "Expense", href: "/expenses/new" },
+      { label: "Check", href: "/checks/new" },
+      { label: "Bill", href: "/bills/new" },
+      { label: "Pay bills", href: "/bills/pay" },
+      { label: "Vendor credit", href: "/vendor-credits/new" },
+      { label: "Credit card credit", href: "/card-credits/new" },
+    ] },
   { label: "Other", items: [{ label: "Bank deposit" }, { label: "Transfer" }, { label: "Journal entry" }] },
 ];
 

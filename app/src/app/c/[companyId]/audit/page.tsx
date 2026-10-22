@@ -35,7 +35,7 @@ export default async function AuditPage({ params, searchParams }: { params: Prom
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-xl font-bold">Audit log</h1>
-      <p className="text-text-muted">Every change to your books, who made it and when. Entries can't be edited or removed.</p>
+      <p className="text-text-muted">Every change to your books, who made it and when. Entries can&apos;t be edited or removed.</p>
       <Card>
         <Table>
           <thead>

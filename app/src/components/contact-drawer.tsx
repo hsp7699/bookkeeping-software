@@ -4,10 +4,11 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
 import { Field, Input, NativeSelect, Textarea } from "@/components/ui/field";
-import { saveContactAction } from "../actions";
+import { saveContactAction } from "@/app/c/[companyId]/actions";
 
 export interface CustomerDraft {
   id?: string;
+  track1099?: boolean;
   displayName: string;
   companyName?: string;
   email?: string;
@@ -18,6 +19,7 @@ export interface CustomerDraft {
 }
 
 interface Props {
+  kind?: "customer" | "vendor";
   companyId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -26,7 +28,8 @@ interface Props {
   onSaved?: (c: { id: string; displayName: string; email: string | null; termsId: string | null }) => void;
 }
 
-export function CustomerDrawer({ companyId, open, onOpenChange, initial, terms, onSaved }: Props) {
+export function CustomerDrawer({ kind = "customer", companyId, open, onOpenChange, initial, terms, onSaved }: Props) {
+  const noun = kind === "customer" ? "customer" : "vendor";
   const [pending, start] = useTransition();
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -36,7 +39,8 @@ export function CustomerDrawer({ companyId, open, onOpenChange, initial, terms, 
     const s = (k: string) => String(f.get(k) ?? "");
     const payload = {
       id: initial?.id,
-      kind: "customer",
+      kind,
+      track1099: f.get("track1099") === "on",
       displayName: s("displayName"),
       companyName: s("companyName"),
       email: s("email"),
@@ -59,13 +63,13 @@ export function CustomerDrawer({ companyId, open, onOpenChange, initial, terms, 
     });
   }
 
-  const formId = "customer-form";
+  const formId = `${kind}-form`;
   const a = initial?.billingAddress ?? {};
   return (
     <Drawer
       open={open}
       onOpenChange={onOpenChange}
-      title={initial?.id ? "Edit customer" : "New customer"}
+      title={initial?.id ? `Edit ${noun}` : `New ${noun}`}
       footer={
         <>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -89,7 +93,12 @@ export function CustomerDrawer({ companyId, open, onOpenChange, initial, terms, 
             {formError}
           </p>
         )}
-        <Field label="Customer display name" required error={errors.displayName} hint="How this customer appears on invoices and lists.">
+        <Field
+          label={kind === "customer" ? "Customer display name" : "Vendor display name"}
+          required
+          error={errors.displayName}
+          hint={kind === "customer" ? "How this customer appears on invoices and lists." : "How this vendor appears on bills, expenses and checks."}
+        >
           {(p) => <Input {...p} name="displayName" defaultValue={initial?.displayName} required autoFocus />}
         </Field>
         <Field label="Company name" error={errors.companyName}>
@@ -116,7 +125,7 @@ export function CustomerDrawer({ companyId, open, onOpenChange, initial, terms, 
           )}
         </Field>
         <fieldset className="flex flex-col gap-3">
-          <legend className="mb-1 text-sm font-medium">Billing address</legend>
+          <legend className="mb-1 text-sm font-medium">{kind === "customer" ? "Billing address" : "Address"}</legend>
           <Input name="line1" aria-label="Street address" placeholder="Street address" defaultValue={a.line1} />
           <Input name="line2" aria-label="Address line 2" placeholder="Suite, unit (optional)" defaultValue={a.line2} />
           <div className="grid grid-cols-[1fr_5rem_7rem] gap-3">
@@ -125,6 +134,12 @@ export function CustomerDrawer({ companyId, open, onOpenChange, initial, terms, 
             <Input name="zip" aria-label="ZIP code" placeholder="ZIP" defaultValue={a.zip} />
           </div>
         </fieldset>
+        {kind === "vendor" && (
+          <label className="flex items-center gap-2">
+            <input type="checkbox" name="track1099" defaultChecked={initial?.track1099} className="size-4 accent-[var(--color-accent)]" />
+            Track payments for 1099
+          </label>
+        )}
         <Field label="Notes">{(p) => <Textarea {...p} name="notes" defaultValue={initial?.notes} />}</Field>
       </form>
     </Drawer>

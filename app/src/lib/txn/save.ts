@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 import { z } from "zod";
 import { one, query, tx, type TxOptions } from "@/db";
 import { lineAmount } from "@/lib/money";
-import { post, PostingError, type PostingInput, type PostingLine, type SystemAccounts, type TxnType } from "@/lib/posting";
+import { post, PostingError, type PostingInput, type SystemAccounts, type TxnType } from "@/lib/posting";
 
 // One pipeline for every transaction type: validate, resolve item lines to
 // accounts, post ledger entries, keep open balances right, number, audit.

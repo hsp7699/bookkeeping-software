@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { CustomerDrawer, type CustomerDraft } from "../customer-drawer";
+import { CustomerDrawer, type CustomerDraft } from "@/components/contact-drawer";
 
 export function EditCustomerButton({ companyId, customer, terms }: { companyId: string; customer: CustomerDraft; terms: { id: string; name: string }[] }) {
   const [open, setOpen] = useState(false);

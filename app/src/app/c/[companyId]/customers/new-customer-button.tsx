@@ -4,7 +4,7 @@ import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { CustomerDrawer } from "./customer-drawer";
+import { CustomerDrawer } from "@/components/contact-drawer";
 
 export function NewCustomerButton({ companyId, terms }: { companyId: string; terms: { id: string; name: string }[] }) {
   const [open, setOpen] = useState(false);

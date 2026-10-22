@@ -13,10 +13,11 @@ import { addDays } from "@/lib/dates";
 import { formatCents, lineAmount } from "@/lib/money";
 import { computeTotals } from "@/lib/posting";
 import type { InvoiceDetail } from "@/lib/queries";
+import { Attachments } from "@/components/attachments";
 import { TxnMoreMenu } from "@/components/txn-more-menu";
 import { EmailInvoiceDialog } from "./email-dialog";
 import { saveTransactionAction } from "../actions";
-import { CustomerDrawer } from "../customers/customer-drawer";
+import { CustomerDrawer } from "@/components/contact-drawer";
 import { ItemDrawer, type SavedItem } from "../items/item-drawer";
 
 interface Option {
@@ -485,6 +486,7 @@ export function SalesForm(props: Props) {
             <Field label="Note to self" hint="Only you see this.">
               {(p) => <Textarea {...p} value={privateNote} onChange={(e) => setPrivateNote(e.target.value)} />}
             </Field>
+            {initial && <Attachments companyId={companyId} txnId={initial.id} />}
           </div>
           <dl className="flex flex-col gap-2 self-start">
             <div className="flex justify-between">
