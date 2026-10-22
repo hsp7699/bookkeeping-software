@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { one, query, tx } from "@/db";
 import { requireCompany } from "@/lib/authz";
-import { addFromFeed, getFeedAccount, importRows, matchExisting, matchOpenDocument, undoReview, type AddSpec } from "@/lib/bank/feed";
+import { addFromFeed, getFeedAccount, importRows, matchExisting, matchOpenDocument, matchTransferPair, undoReview, type AddSpec } from "@/lib/bank/feed";
 import { detectFormat, guessColumns, parseCsv, parseOfx, rowsFromCsv, type ColumnMap } from "@/lib/bank/parse";
 import { PostingError } from "@/lib/posting";
 import { UserError } from "@/lib/txn/save";
@@ -104,7 +104,7 @@ export async function addFeedTxnAction(companyId: string, rowId: string, raw: un
   }
 }
 
-export async function matchFeedTxnAction(companyId: string, rowId: string, target: { kind: "match" | "invoice" | "bill"; txnId: string }): Promise<ActionResult<null>> {
+export async function matchFeedTxnAction(companyId: string, rowId: string, target: { kind: "match" | "invoice" | "bill" | "transfer"; txnId: string }): Promise<ActionResult<null>> {
   const ctx = await requireCompany(companyId, "standard");
   try {
     await tx(async (db) => {
@@ -112,6 +112,7 @@ export async function matchFeedTxnAction(companyId: string, rowId: string, targe
       if (!r) throw new UserError("That bank transaction no longer exists.");
       const feed = await getFeedAccount(db, companyId, r.feed_account_id);
       if (target.kind === "match") await matchExisting(db, companyId, ctx.userId, feed, rowId, target.txnId);
+      else if (target.kind === "transfer") await matchTransferPair(db, companyId, ctx.userId, feed, rowId, target.txnId);
       else await matchOpenDocument(db, companyId, ctx.userId, feed, rowId, target.txnId);
     });
     done(companyId);

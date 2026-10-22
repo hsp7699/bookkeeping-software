@@ -27,3 +27,36 @@ Tests at the end of Phase 1: 71 unit and database integration tests, 9 browser c
 - The production build left out the PDF library's font files; PDFs failed only in production.
 - The dashboard counted future-dated entries in "cash in the bank"; the balance sheet didn't.
 - The import dialog kept the previous result when reopened.
+
+# Build log: Phase 2
+
+Scope: everything in the "should" column except online invoice payment (declined)
+and live bank connections (waiting on the owner's Plaid keys).
+
+| Step | What shipped | Verified by |
+| --- | --- | --- |
+| P2-1 Schema | Migration `0002_phase2.sql`: classes, locations, tags, recurring templates, budgets, reminders, receipts, invite columns, three new transaction types | migrations applied to a fresh database |
+| P2-2 Reports + tax | Trial balance, cash flow, sales by customer and product, expenses by vendor, 1099 report, sales tax liability and payments, P&L by class/location and against the previous period or year | `e2e/p2-reports-tax.mjs`, DB integration tests |
+| P2-3 Tracking | Classes per line, locations per transaction, tags | `e2e/p2-tracking.mjs` |
+| P2-4 Documents | Estimates with progress invoicing, purchase orders to bills, billable expenses onto invoices, sub-customers, tax-exempt customers | `e2e/p2-docs.mjs`, DB integration tests |
+| P2-5 Automation | Recurring templates (automatic or reminder, catch-up after downtime), overdue reminders, customer statements (balance forward / open item) with PDF and email, invoice logo, colour and footer | `e2e/p2-recurring.mjs`, runner and statement DB tests, schedule unit tests |
+| P2-6 Team and extras | Budgets and budget vs actuals, user invitations and roles, company switcher, view-only mode, transfer detection across feed accounts, receipts inbox | `e2e/p2-team.mjs`, budget and transfer DB tests |
+
+## Decisions
+
+- **Background jobs run inside the app** (`instrumentation.ts`, every 15 minutes, a
+  Postgres advisory lock so only one server runs them). No extra worker container.
+- **Missed recurring runs are caught up** (up to 24 per template); resuming a paused
+  template skips the dates it missed instead.
+- **Invitations work with sign-ups turned off**: the signup form accepts a live invite
+  token for the invited address only.
+- **No receipt text extraction**: it needs an OCR service; you type vendor, date and amount.
+- **A too-light invoice accent colour is refused** (WCAG 4.5:1 against white paper).
+- **Not enough permission now redirects** to a "you don't have access" page instead of an error.
+
+## Bugs found by the checks
+
+- Recurring pause/resume and statement emails wrote audit actions the audit table doesn't allow.
+- A reports-only user opening Settings directly got an application error.
+- Budget section titles scrolled out of view in the wide month grid.
+- The Users table said "Invited" twice for a pending invitation.

@@ -9,20 +9,31 @@ public sources (no code, assets or copy taken), as your own self-hosted app.
 - **deploy/**: Docker Compose stack for a single server, with HTTPS and backups
 - **replica/**: the planning trail: recon map, feature matrix, architecture, design tokens, screenshots
 
-## What it does (Phase 1)
+## What it does
 
 | Area | |
 | --- | --- |
-| Ledger | Double-entry for 15 transaction types. Every transaction balances, enforced by the database. Cash or accrual reporting, closed periods with a password, a full audit log. |
-| Sales | Customers, products and services, invoices with tax and discounts, PDFs and email, receive payment (partial, several invoices at once), sales receipts, credit memos, refunds, applying credits. |
-| Expenses | Vendors, expenses with split categories, checks, bills, paying several bills at once, vendor credits, credit card credits, attachments. |
-| Banking | Import CSV, OFX, QFX or QBO files (duplicates skipped). Review, categorize, split or match each line to an existing transaction or an open invoice or bill. Rules, transfers, reconciliation with history and undo. |
-| Reports | Profit and loss (total or by month), balance sheet, A/R and A/P aging (summary and detail), general ledger, drill-down from any number, CSV export, print. |
+| Ledger | Double-entry for 18 transaction types. Every transaction balances, enforced by the database. Cash or accrual reporting, closed periods with a password, a full audit log. |
+| Sales | Customers and sub-customers, products and services, invoices with tax and discounts, PDFs and email, receive payment (partial, several invoices at once), sales receipts, credit memos, refunds, applying credits. Estimates (with progress invoicing), billable expenses, customer statements, overdue reminders, your own logo, colour and footer on PDFs. |
+| Expenses | Vendors, expenses with split categories, checks, bills, paying several bills at once, vendor credits, credit card credits, purchase orders, attachments, a receipts inbox. |
+| Banking | Import CSV, OFX, QFX or QBO files (duplicates skipped). Review, categorize, split or match each line to an existing transaction or an open invoice or bill. Rules, transfers (detected across two connected accounts), reconciliation with history and undo. |
+| Reports | Profit and loss (total, by month, class or location, or against the previous period or year), balance sheet, cash flow, trial balance, A/R and A/P aging, general ledger, sales by customer and by product, expenses by vendor, 1099 payments, sales tax liability, budget vs actuals. Drill-down from any number, CSV export, print. |
+| Planning | Budgets by account and month, started blank or from last year's actuals. |
+| Automation | Recurring invoices, expenses, bills, journal entries and transfers (created automatically or as reminders; invoices can email themselves). |
+| Tax and tracking | Sales tax rates, liability report and payments, tax-exempt customers, 1099 vendors. Classes, locations and tags. |
+| Team | Several companies per sign-in. Invite users as owner, admin, accountant, standard or reports-only. |
 | Home | Cash, money owed both ways, net income, a 6-month income vs expenses chart, top expense categories. |
 
-Not yet: live bank connections, recurring transactions, budgets, classes and
-locations, sales tax reports, inventory, Google sign-in, inviting other users.
-The full list, with what's done, is in `replica/features.csv`.
+Not yet: live bank connections (Plaid, waiting on your keys), reading receipts
+automatically, inventory, projects, Google sign-in, PDF export of reports.
+Online invoice payment is left out on purpose. The full list, with what's done,
+is in `replica/features.csv`.
+
+Background jobs (recurring transactions and overdue reminders) run inside the
+app every 15 minutes; set `JOBS=off` to turn them off. Emails (invoices,
+statements, reminders, invitations) need `SMTP_URL` and `MAIL_FROM`; without them
+you download PDFs and copy invite links instead. Set `APP_URL` to your public
+address so invitation links point at it.
 
 ## Run it locally
 

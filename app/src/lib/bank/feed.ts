@@ -223,6 +223,26 @@ export async function matchOpenDocument(db: PoolClient, companyId: string, userI
   await query("update bank_feed_txns set status = 'categorized', created_txn_id = $2, reviewed_by = $3, reviewed_at = now() where id = $1", [rowId, saved.id, userId], db);
 }
 
+/**
+ * Both sides of a transfer between two connected accounts: record one transfer
+ * from this line, and mark the other account's line as matched to it.
+ */
+export async function matchTransferPair(db: PoolClient, companyId: string, userId: string, feed: FeedAccount, rowId: string, otherRowId: string) {
+  const other = await one<{ feed_account_id: string; amount_cents: number; posted_date: string; status: string }>(
+    "select feed_account_id, amount_cents, posted_date::text, status from bank_feed_txns where company_id = $1 and id = $2 for update",
+    [companyId, otherRowId],
+    db,
+  );
+  if (!other || other.status !== "for_review") throw new UserError("The other side of that transfer was already reviewed.");
+  const row = await lockRow(db, companyId, rowId);
+  if (other.feed_account_id === row.feed_account_id || other.amount_cents !== -row.amount_cents) throw new UserError("Those two bank lines aren't the same transfer.");
+  const otherFeed = await getFeedAccount(db, companyId, other.feed_account_id);
+  const txnId = await addFromFeed(db, companyId, userId, feed, rowId, { kind: "transfer", otherAccountId: otherFeed.account_id, memo: row.description });
+  await markCleared(db, txnId, otherFeed.account_id);
+  await query("update bank_feed_txns set status = 'categorized', matched_txn_id = $2, reviewed_by = $3, reviewed_at = now() where id = $1", [otherRowId, txnId, userId], db);
+  return txnId;
+}
+
 /** Back to "for review". A transaction the feed created is deleted; a matched one is just unlinked. */
 export async function undoReview(db: PoolClient, companyId: string, userId: string, rowId: string) {
   const row = await one<{ status: string; created_txn_id: string | null; matched_txn_id: string | null; feed_account_id: string }>(
@@ -239,6 +259,8 @@ export async function undoReview(db: PoolClient, companyId: string, userId: stri
   }
   await query("update bank_feed_txns set status = 'for_review', created_txn_id = null, matched_txn_id = null, reviewed_by = $2, reviewed_at = now() where id = $1", [rowId, userId], db);
   if (row.created_txn_id) {
+    // the other side of a transfer goes back to review with it
+    await query("update bank_feed_txns set status = 'for_review', matched_txn_id = null, reviewed_by = $2, reviewed_at = now() where matched_txn_id = $1", [row.created_txn_id, userId], db);
     const before = await one("select * from transactions where id = $1", [row.created_txn_id], db);
     const targets = (await query<{ target_txn_id: string }>("select target_txn_id from payment_applications where source_txn_id = $1", [row.created_txn_id], db)).map((r) => r.target_txn_id);
     await query("delete from transactions where id = $1", [row.created_txn_id], db);
@@ -254,7 +276,8 @@ export async function undoReview(db: PoolClient, companyId: string, userId: stri
 }
 
 export interface Suggestion {
-  kind: "match" | "invoice" | "bill" | "rule";
+  kind: "match" | "invoice" | "bill" | "rule" | "transfer";
+  /** for "transfer", the other account's bank line */
   txnId?: string;
   label: string;
   detail: string;
@@ -284,6 +307,13 @@ export async function suggestionsFor(companyId: string, feed: FeedAccount, rows:
        and t.balance_cents = any($2::bigint[])`,
     [companyId, amounts.map(Math.abs)],
   );
+  // the other side of a transfer: an opposite line waiting in another connected account
+  const pairs = await query<{ id: string; posted_date: string; amount_cents: number; name: string }>(
+    `select b.id, b.posted_date::text, b.amount_cents, a.name
+     from bank_feed_txns b join bank_feed_accounts f on f.id = b.feed_account_id join accounts a on a.id = f.account_id
+     where b.company_id = $1 and b.status = 'for_review' and b.feed_account_id <> $2 and b.amount_cents = any($3::bigint[])`,
+    [companyId, feed.id, amounts.map((a) => -a)],
+  );
   const LABEL: Record<string, string> = { payment: "Payment", deposit: "Deposit", expense: "Expense", check: "Check", bill_payment: "Bill payment", transfer: "Transfer", sales_receipt: "Sales receipt", refund_receipt: "Refund", journal_entry: "Journal entry", credit_card_credit: "Card credit" };
   const out = new Map<string, Suggestion[]>();
   const used = new Set<string>();
@@ -294,6 +324,9 @@ export async function suggestionsFor(companyId: string, feed: FeedAccount, rows:
       .sort((a, b) => Math.abs(Date.parse(a.txn_date) - Date.parse(r.posted_date)) - Math.abs(Date.parse(b.txn_date) - Date.parse(r.posted_date)));
     for (const e of near.slice(0, 3)) list.push({ kind: "match", txnId: e.id, label: `${LABEL[e.type] ?? e.type}${e.number ? ` ${e.number}` : ""}${e.contact ? ` · ${e.contact}` : ""}`, detail: e.txn_date });
     if (near[0]) used.add(near[0].id);
+    for (const t of pairs.filter((t) => t.amount_cents === -r.amount_cents && Math.abs(Date.parse(t.posted_date) - Date.parse(r.posted_date)) <= 5 * 86400000).slice(0, 2)) {
+      list.push({ kind: "transfer", txnId: t.id, label: `Transfer ${r.amount_cents > 0 ? "from" : "to"} ${t.name}`, detail: t.posted_date });
+    }
     for (const d of docs.filter((d) => d.balance_cents === Math.abs(r.amount_cents) && (d.type === "invoice") === r.amount_cents > 0).slice(0, 3)) {
       list.push({ kind: d.type as "invoice" | "bill", txnId: d.id, label: `${d.type === "invoice" ? "Invoice" : "Bill"}${d.number ? ` ${d.number}` : ""} · ${d.contact}`, detail: d.due_date ?? "" });
     }

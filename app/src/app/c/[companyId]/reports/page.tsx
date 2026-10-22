@@ -11,6 +11,7 @@ const groups: { title: string; reports: { slug: string; name: string; blurb: str
       { slug: "balance-sheet", name: "Balance sheet", blurb: "What you own and owe on a date.", ready: true },
       { slug: "cash-flow", name: "Statement of cash flows", blurb: "Where cash came from and went.", ready: true },
       { slug: "profit-and-loss?compare=prev_year", name: "Profit and loss vs last year", blurb: "This period next to the same period last year.", ready: true },
+      { slug: "budget-vs-actuals", name: "Budget vs actuals", blurb: "Each account's actual amount next to your budget.", ready: true },
     ],
   },
   {

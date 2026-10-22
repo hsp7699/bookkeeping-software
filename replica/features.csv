@@ -56,36 +56,36 @@ Quick Create (+) menu,navigation,must,yes,yes,S04
 Global search by number amount or name,navigation,must,yes,yes,S05
 Live bank connection through an aggregator (Plaid or similar),banking,should,yes,no,S30; user's own aggregator keys; not Intuit's bank network
 Credit card accounts and credit card payments in feed,banking,should,yes,yes,card feeds; pay the card with a transfer
-Transfers detected across two connected accounts,banking,should,yes,no,
-Receipt upload with field extraction and match,banking,should,yes,no,S33
-Estimates with status and convert to invoice,sales,should,yes,no,S16
-Progress invoicing from an estimate,sales,should,yes,no,
-Recurring invoices bills and expenses,automation,should,yes,no,S44
-Customer statements,sales,should,yes,no,S50
-Invoice reminders for overdue invoices,sales,should,yes,no,
-Pay invoice online via the user's own Stripe account,sales,should,yes,no,S49; replaces QuickBooks Payments
-Public customer invoice page,sales,should,yes,no,S49
-Invoice template customization (logo colours fields),sales,should,yes,no,S48; our own templates
-Billable expenses flow onto the next invoice,sales,should,yes,no,F05
-Sub-customers,sales,should,yes,no,
-Sales tax rates agencies and liability report,tax,should,yes,partial,"S40; manual rates; rates and agencies, tax on invoices, Sales Tax Payable; no liability report yet"
-Record sales tax payment,tax,should,yes,no,
-Tax-exempt customers,tax,should,yes,no,
-1099 vendor tracking and 1099 report,tax,should,yes,partial,report only; no e-filing; the 1099 flag on vendors; no 1099 report yet
-Classes,tracking,should,yes,no,S43; Plus feature
-Locations,tracking,should,yes,no,S43; Plus feature
-Tags,tracking,should,yes,no,
-Report columns by month class or customer and compare periods,reports,should,yes,partial,months as columns; no class/customer columns or period comparison yet
+Transfers detected across two connected accounts,banking,should,yes,yes,an opposite line in another connected account within 5 days is suggested as a transfer; one click records it and clears both lines
+Receipt upload with field extraction and match,banking,should,yes,partial,"S33; upload, match to an existing transaction or create an expense; you type vendor/date/amount (no automatic text extraction)"
+Estimates with status and convert to invoice,sales,should,yes,yes,"S16; pending/accepted/rejected/closed, expiry date, PDF, convert to invoice"
+Progress invoicing from an estimate,sales,should,yes,yes,invoice an estimate in parts; it closes when fully invoiced
+Recurring invoices bills and expenses,automation,should,yes,yes,"S44; invoices, sales receipts, expenses, checks, bills, journal entries, transfers; automatic or reminder; auto-email invoices"
+Customer statements,sales,should,yes,yes,"S50; balance forward or open invoices, aging, PDF and email"
+Invoice reminders for overdue invoices,sales,should,yes,yes,schedule in Settings (days after due); needs SMTP
+Pay invoice online via the user's own Stripe account,sales,should,yes,skip,owner declined online payments for now
+Public customer invoice page,sales,should,yes,skip,goes with online payments; declined for now
+Invoice template customization (logo colours fields),sales,should,yes,yes,"S48; logo, accent colour (contrast-checked), footer, qty/rate columns"
+Billable expenses flow onto the next invoice,sales,should,yes,yes,F05; billable lines with a customer show on that customer's next invoice
+Sub-customers,sales,should,yes,yes,customer tree; parent shown on the customer page
+Sales tax rates agencies and liability report,tax,should,yes,yes,S40; manual rates; liability report by rate and agency
+Record sales tax payment,tax,should,yes,yes,Sales tax page
+Tax-exempt customers,tax,should,yes,yes,exempt customers can't be charged tax
+1099 vendor tracking and 1099 report,tax,should,yes,yes,"1099 flag and report ($2,000 threshold from 2026, $600 before); no e-filing"
+Classes,tracking,should,yes,yes,S43; per line; P&L by class
+Locations,tracking,should,yes,yes,S43; per transaction; P&L by location
+Tags,tracking,should,yes,yes,free-form labels on transactions
+Report columns by month class or customer and compare periods,reports,should,yes,yes,"months, class, location, previous period, previous year"
 Saved report customizations,reports,should,yes,no,
-Sales by customer and sales by product reports,reports,should,yes,no,
-Expenses by vendor report,reports,should,yes,no,
-Cash flow statement,reports,should,yes,no,
-Trial balance,reports,should,yes,no,
-Budgets by account and month,planning,should,yes,no,S41; Plus feature
-Budget vs actuals report,planning,should,yes,no,
-Multiple users with roles (admin standard reports-only),users,should,yes,partial,S46; roles are enforced on every page and action; no invite screen yet
-Invite an accountant user,users,should,yes,no,
-Purchase orders and convert to bill,expenses,should,yes,no,S27
+Sales by customer and sales by product reports,reports,should,yes,yes,
+Expenses by vendor report,reports,should,yes,yes,
+Cash flow statement,reports,should,yes,yes,
+Trial balance,reports,should,yes,yes,
+Budgets by account and month,planning,should,yes,yes,"S41; month grid per P&L account, spread a yearly total, start from last year's actuals"
+Budget vs actuals report,planning,should,yes,yes,with CSV export
+Multiple users with roles (admin standard reports-only),users,should,yes,yes,"S46; owner, admin, accountant, standard, reports only; enforced on every page and action"
+Invite an accountant user,users,should,yes,yes,"invite link (emailed when SMTP is set), works with sign-ups turned off"
+Purchase orders and convert to bill,expenses,should,yes,yes,S27
 Inventory items with quantity on hand and FIFO cost,inventory,could,yes,no,S13; Plus feature
 Inventory adjustments and reorder points,inventory,could,yes,no,
 Bundles,inventory,could,yes,no,

@@ -3,6 +3,8 @@ import { requireCompany } from "@/lib/authz";
 import { readParams, type ReportParams } from "./params";
 import { profitAndLoss } from "./pnl";
 import { aging, balanceSheet, generalLedger } from "./statements";
+import { budgetVsActuals } from "@/lib/budgets";
+import { query } from "@/db";
 import { cashFlow, expensesByVendor, salesByCustomer, salesByProduct, trialBalance, vendor1099 } from "./more";
 
 const money = (c: number) => (c / 100).toFixed(2);
@@ -22,9 +24,24 @@ export function toCsv(rows: (string | number | null)[][]): string {
     .join("\r\n");
 }
 
-type Builder = (companyId: string, sp: ReportParams & { view?: string; account?: string; year?: string }) => Promise<{ name: string; rows: (string | number | null)[][] }>;
+type Builder = (companyId: string, sp: ReportParams & { view?: string; account?: string; year?: string; budget?: string }) => Promise<{ name: string; rows: (string | number | null)[][] }>;
 
 const BUILDERS: Record<string, Builder> = {
+  "budget-vs-actuals": async (companyId, sp) => {
+    const p = await readParams(companyId, sp);
+    const ids = await query<{ id: string }>("select id from budgets where company_id = $1 order by fiscal_year desc, lower(name)", [companyId]);
+    const id = ids.find((b) => b.id === sp.budget)?.id ?? ids[0]?.id;
+    const r = id ? await budgetVsActuals(companyId, id, p.from, p.to, p.basis) : null;
+    const rows: (string | number | null)[][] = [[p.companyName], ["Budget vs actuals", r?.budget.name ?? "", `${p.from} to ${p.to}`, p.basis], [], ["Account", "Actual", "Budget", "Over budget"]];
+    for (const s of r?.sections ?? []) {
+      if (!s.rows.length) continue;
+      rows.push([s.title]);
+      for (const row of s.rows) rows.push([`${"  ".repeat(row.depth + 1)}${row.name}`, money(row.actual), money(row.budget), money(row.actual - row.budget)]);
+      rows.push([`Total ${s.title.toLowerCase()}`, money(s.actual), money(s.budget), money(s.actual - s.budget)]);
+    }
+    if (r) rows.push(["Net income", money(r.netIncome.actual), money(r.netIncome.budget), money(r.netIncome.actual - r.netIncome.budget)]);
+    return { name: `budget-vs-actuals-${p.from}-${p.to}`, rows };
+  },
   "profit-and-loss": async (companyId, sp) => {
     const p = await readParams(companyId, sp);
     const r = await profitAndLoss(companyId, p.from, p.to, p.basis, p.byMonth);

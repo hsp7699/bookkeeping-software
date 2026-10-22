@@ -33,7 +33,7 @@ export async function requireCompany(companyId: string, min: Role = "reports_onl
     [companyId, userId],
   );
   if (!m) notFound();
-  if (rank[m.role] < rank[min]) throw new Error("You don't have permission to do that.");
+  if (rank[m.role] < rank[min]) redirect(`/c/${companyId}/no-access`);
   return { userId, companyId, companyName: m.name, role: m.role };
 }
 

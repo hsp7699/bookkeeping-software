@@ -5,16 +5,19 @@ import {
   BookOpen,
   ClipboardList,
   FileText,
+  FileImage,
   History,
   Home,
   Landmark,
   ListChecks,
   Package,
   Percent,
+  PiggyBank,
   Receipt,
   Repeat,
   Scale,
   Settings,
+  UserCog,
   Store,
   Users,
   type LucideIcon,
@@ -29,6 +32,8 @@ interface Item {
   icon: LucideIcon;
   /** not built yet: shown so the shape of the app is visible, but disabled */
   soon?: boolean;
+  /** admins and owners only */
+  admin?: boolean;
 }
 
 const groups: { label?: string; items: Item[] }[] = [
@@ -47,6 +52,7 @@ const groups: { label?: string; items: Item[] }[] = [
     label: "Expenses",
     items: [
       { href: "/expenses", label: "Expenses", icon: Receipt },
+      { href: "/receipts", label: "Receipts", icon: FileImage },
       { href: "/vendors", label: "Vendors", icon: Store },
     ],
   },
@@ -62,15 +68,21 @@ const groups: { label?: string; items: Item[] }[] = [
     items: [
       { href: "/accounts", label: "Chart of accounts", icon: BookOpen },
       { href: "/reports", label: "Reports", icon: BarChart3 },
+      { href: "/budgets", label: "Budgets", icon: PiggyBank },
       { href: "/taxes", label: "Sales tax", icon: Percent },
       { href: "/recurring", label: "Recurring", icon: Repeat },
       { href: "/audit", label: "Audit log", icon: History },
     ],
   },
-  { items: [{ href: "/settings", label: "Settings", icon: Settings }] },
+  {
+    items: [
+      { href: "/users", label: "Users", icon: UserCog, admin: true },
+      { href: "/settings", label: "Settings", icon: Settings, admin: true },
+    ],
+  },
 ];
 
-export function Nav({ companyId }: { companyId: string }) {
+export function Nav({ companyId, isAdmin }: { companyId: string; isAdmin: boolean }) {
   const path = usePathname();
   const base = `/c/${companyId}`;
   return (
@@ -78,7 +90,7 @@ export function Nav({ companyId }: { companyId: string }) {
       {groups.map((g, i) => (
         <div key={i} className="flex flex-col gap-0.5">
           {g.label && <p className="px-3 pb-1 text-xs font-medium tracking-wide text-nav-text uppercase opacity-75">{g.label}</p>}
-          {g.items.map((item) => {
+          {g.items.filter((item) => isAdmin || !item.admin).map((item) => {
             const href = base + item.href;
             const active = item.href === "" ? path === base : path.startsWith(href);
             const Icon = item.icon;

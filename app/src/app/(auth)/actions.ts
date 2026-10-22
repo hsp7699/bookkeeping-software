@@ -9,6 +9,7 @@ import { signIn, signOut } from "@/auth";
 import { one, query, tx } from "@/db";
 import type { EntityType } from "@/lib/coa";
 import { createCompany } from "@/lib/company";
+import { hashInviteToken } from "@/lib/invites";
 import { requireUser } from "@/lib/authz";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -27,14 +28,49 @@ function fieldErrors(e: z.ZodError) {
 export async function signUpAction(_: FormState, form: FormData): Promise<FormState> {
   const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
   if (!rateLimit(`signup:ip:${ip}`, 5, 60 * 60 * 1000).ok) return { error: "Too many new accounts from this network. Try again later." };
-  if (process.env.ALLOW_SIGNUP === "false") return { error: "New sign-ups are turned off on this server." };
   const parsed = signUpSchema.safeParse(Object.fromEntries(form));
   if (!parsed.success) return { fieldErrors: fieldErrors(parsed.error) };
   const { name, email, password } = parsed.data;
+  // with sign-ups off, only someone holding a live invitation for this address can join
+  const invite = String(form.get("invite") ?? "");
+  const invited = invite
+    ? await one("select 1 from memberships where invite_token_hash = $1 and status = 'invited' and invite_expires_at > now() and invited_email = $2", [hashInviteToken(invite), email])
+    : null;
+  if (process.env.ALLOW_SIGNUP === "false" && !invited) return { error: "New sign-ups are turned off on this server. Ask the owner for an invitation." };
   const exists = await one("select 1 from users where email = $1", [email]);
   if (exists) return { fieldErrors: { email: "An account with this email already exists. Sign in instead." } };
   await query("insert into users (email, name, password_hash) values ($1, $2, $3)", [email, name, await hash(password)]);
-  await signIn("credentials", { email, password, redirectTo: "/" });
+  await signIn("credentials", { email, password, redirectTo: invited ? `/invite/${invite}` : "/" });
+}
+
+/** Join the company an invitation is for, as the signed-in user. */
+export async function acceptInviteAction(_: FormState, form: FormData): Promise<FormState> {
+  const userId = await requireUser();
+  const hash = hashInviteToken(String(form.get("token") ?? ""));
+  const companyId = await tx(async (db) => {
+    const m = await one<{ id: string; company_id: string; invited_email: string; role: string }>(
+      "select id, company_id, invited_email, role from memberships where invite_token_hash = $1 and status = 'invited' and invite_expires_at > now() for update",
+      [hash],
+      db,
+    );
+    if (!m) return { error: "This invitation was already used or has expired." };
+    const me = await one<{ email: string }>("select email from users where id = $1", [userId], db);
+    if (me!.email.toLowerCase() !== m.invited_email.toLowerCase()) return { error: `This invitation is for ${m.invited_email}.` };
+    await query("delete from memberships where company_id = $1 and user_id = $2 and status = 'removed'", [m.company_id, userId], db);
+    const already = await one("select 1 from memberships where company_id = $1 and user_id = $2", [m.company_id, userId], db);
+    if (already) await query("delete from memberships where id = $1", [m.id], db);
+    else
+      await query("update memberships set user_id = $2, status = 'active', invite_token_hash = null, invite_expires_at = null, updated_at = now() where id = $1", [m.id, userId], db);
+    await query("insert into audit_events (company_id, user_id, entity, entity_id, action, after) values ($1, $2, 'membership', $3, 'update', $4)", [
+      m.company_id,
+      userId,
+      m.id,
+      JSON.stringify({ accepted: m.invited_email, role: m.role }),
+    ], db);
+    return m.company_id;
+  });
+  if (typeof companyId !== "string") return companyId;
+  redirect(`/c/${companyId}`);
 }
 
 export async function signInAction(_: FormState, form: FormData): Promise<FormState> {

@@ -217,7 +217,7 @@ export function BankFeed(props: Props) {
                           row={r}
                           pending={pending}
                           onAdd={(spec) => run(() => addFeedTxnAction(companyId, r.id, spec))}
-                          onMatch={(s) => run(() => matchFeedTxnAction(companyId, r.id, { kind: s.kind as "match" | "invoice" | "bill", txnId: s.txnId! }))}
+                          onMatch={(s) => run(() => matchFeedTxnAction(companyId, r.id, { kind: s.kind as "match" | "invoice" | "bill" | "transfer", txnId: s.txnId! }))}
                           onExclude={() => run(() => excludeFeedTxnsAction(companyId, [r.id]))}
                           onCreateRule={() => setRuleFrom(r)}
                         />
