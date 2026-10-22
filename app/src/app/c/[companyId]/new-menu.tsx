@@ -19,7 +19,14 @@ const columns: { label: string; items: { label: string; href?: string }[] }[] = 
       { label: "Vendor credit", href: "/vendor-credits/new" },
       { label: "Credit card credit", href: "/card-credits/new" },
     ] },
-  { label: "Other", items: [{ label: "Bank deposit" }, { label: "Transfer" }, { label: "Journal entry" }] },
+  {
+    label: "Other",
+    items: [
+      { label: "Bank deposit", href: "/deposits/new" },
+      { label: "Transfer", href: "/transfers/new" },
+      { label: "Journal entry", href: "/journal-entries/new" },
+    ],
+  },
 ];
 
 /** Quick Create (+ New). "n" opens it from anywhere outside a text field. */

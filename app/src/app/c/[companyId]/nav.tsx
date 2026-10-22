@@ -61,7 +61,7 @@ const groups: { label?: string; items: Item[] }[] = [
       { href: "/audit", label: "Audit log", icon: History },
     ],
   },
-  { items: [{ href: "/settings", label: "Settings", icon: Settings, soon: true }] },
+  { items: [{ href: "/settings", label: "Settings", icon: Settings }] },
 ];
 
 export function Nav({ companyId }: { companyId: string }) {
