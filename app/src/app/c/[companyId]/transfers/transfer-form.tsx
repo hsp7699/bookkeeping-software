@@ -65,7 +65,9 @@ export function TransferForm({
     });
   }
 
-  const select = (value: string, onChange: (v: string) => void) => (p: object) => (
+  const select = (value: string, onChange: (v: string) => void) =>
+    function AccountSelect(p: object) {
+      return (
     <NativeSelect {...p} value={value} onChange={(e) => onChange(e.target.value)}>
       {Object.entries(Object.groupBy(accounts, (a) => a.type)).map(([type, list]) => (
         <optgroup key={type} label={ACCOUNT_TYPE_LABELS[type as AccountType]}>
@@ -77,7 +79,8 @@ export function TransferForm({
         </optgroup>
       ))}
     </NativeSelect>
-  );
+      );
+    };
 
   return (
     <FormShell
