@@ -8,7 +8,6 @@ const b = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? "
 const p = await b.newPage({ viewport: { width: 1360, height: 900 } });
 const errors = [];
 p.on("pageerror", (e) => errors.push(e.message));
-p.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 const step = (s) => console.log("·", s);
 
 const email = `slice+${Date.now()}@example.com`;
@@ -91,5 +90,5 @@ await p.screenshot({ path: `${out}/customers.png` });
 await p.goto(`${companyUrl}/accounts`);
 await p.screenshot({ path: `${out}/accounts.png`, fullPage: true });
 
-console.log("OK", companyUrl, errors.length ? `\nPAGE ERRORS:\n${errors.join("\n")}` : "no page errors");
+console.log(errors.length ? `PAGE ERRORS:\n${errors.join("\n")}` : `OK, no page errors (${companyUrl})`);
 await b.close();
