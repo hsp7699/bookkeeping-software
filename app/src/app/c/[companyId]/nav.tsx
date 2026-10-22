@@ -12,7 +12,6 @@ import {
   Settings,
   Store,
   Users,
-  Wallet,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
