@@ -8,16 +8,29 @@ const groups: { title: string; reports: { slug: string; name: string; blurb: str
     title: "Business overview",
     reports: [
       { slug: "profit-and-loss", name: "Profit and loss", blurb: "Income, expenses and net income for a period.", ready: true },
-      { slug: "balance-sheet", name: "Balance sheet", blurb: "What you own and owe on a date." },
+      { slug: "balance-sheet", name: "Balance sheet", blurb: "What you own and owe on a date.", ready: true },
     ],
   },
   {
     title: "Who owes you",
-    reports: [{ slug: "ar-aging", name: "A/R aging", blurb: "Unpaid invoices by how overdue they are." }],
+    reports: [
+      { slug: "ar-aging", name: "A/R aging summary", blurb: "Unpaid invoices by how overdue they are.", ready: true },
+      { slug: "ar-aging?view=detail", name: "A/R aging detail", blurb: "Every open invoice and credit, oldest first.", ready: true },
+    ],
+  },
+  {
+    title: "What you owe",
+    reports: [
+      { slug: "ap-aging", name: "A/P aging summary", blurb: "Unpaid bills by how overdue they are.", ready: true },
+      { slug: "ap-aging?view=detail", name: "A/P aging detail", blurb: "Every open bill and vendor credit.", ready: true },
+    ],
   },
   {
     title: "For your accountant",
-    reports: [{ slug: "general-ledger", name: "General ledger", blurb: "Every ledger entry by account." }],
+    reports: [
+      { slug: "general-ledger", name: "General ledger", blurb: "Every ledger entry by account, with running balances.", ready: true },
+      { slug: "profit-and-loss?columns=months", name: "Profit and loss by month", blurb: "Income and expenses month by month.", ready: true },
+    ],
   },
 ];
 

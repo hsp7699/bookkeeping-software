@@ -1,140 +1,109 @@
-import Link from "next/link";
-import { Card } from "@/components/ui/table";
-import { one } from "@/db";
+import { Amount, ReportFrame } from "@/components/report-frame";
 import { requireCompany } from "@/lib/authz";
 import { cn } from "@/lib/cn";
 import { formatDate } from "@/lib/dates";
-import { formatCents } from "@/lib/money";
+import { readParams, type ReportParams } from "@/lib/reports/params";
 import { profitAndLoss, type ReportSection } from "@/lib/reports/pnl";
-import { PRESETS, resolveRange, type Preset } from "@/lib/reports/range";
-import { companyToday } from "@/lib/queries";
 import { ReportToolbar } from "../report-toolbar";
 
-function Money({ cents, className }: { cents: number; className?: string }) {
-  return <span className={cn("num", cents < 0 && "text-negative-amount", className)}>{formatCents(cents)}</span>;
+function monthLabel(m: string) {
+  if (m === "Total") return "Total";
+  const [y, mo] = m.split("-").map(Number);
+  return new Date(Date.UTC(y, mo - 1, 1)).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
-function Section({ s }: { s: ReportSection }) {
-  if (s.rows.length === 0 && s.key !== "income" && s.key !== "expenses") return null;
-  return (
-    <>
-      <tr>
-        <th scope="rowgroup" colSpan={2} className="pt-4 pb-1 text-left font-semibold">
-          {s.title}
-        </th>
-      </tr>
-      {s.rows.map((r) => (
-        <tr key={r.accountId} className="hover:bg-row-hover">
-          <th scope="row" className="py-1 pl-6 text-left font-normal">
-            {r.name}
-          </th>
-          <td className="py-1 text-right">
-            <Money cents={r.amountCents} />
-          </td>
-        </tr>
-      ))}
-      <tr className="border-t border-border">
-        <th scope="row" className="py-1.5 text-left font-semibold">
-          Total {s.title.toLowerCase()}
-        </th>
-        <td className="py-1.5 text-right font-semibold">
-          <Money cents={s.totalCents} />
-        </td>
-      </tr>
-    </>
-  );
-}
+export default async function ProfitAndLossPage({ params, searchParams }: { params: Promise<{ companyId: string }>; searchParams: Promise<ReportParams> }) {
+  const { companyId } = await params;
+  await requireCompany(companyId);
+  const p = await readParams(companyId, await searchParams);
+  const r = await profitAndLoss(companyId, p.from, p.to, p.basis, p.byMonth);
+  const empty = [r.income, r.cogs, r.expenses, r.otherIncome, r.otherExpense].every((s) => s.rows.length === 0);
+  const drill = (accountId: string, col: number) => {
+    const [from, to] =
+      r.columns[col] === "Total"
+        ? [p.from, p.to]
+        : [`${r.columns[col]}-01`, new Date(Date.UTC(Number(r.columns[col].slice(0, 4)), Number(r.columns[col].slice(5, 7)), 0)).toISOString().slice(0, 10)];
+    return `/c/${companyId}/reports/transactions?account=${accountId}&from=${from < p.from ? p.from : from}&to=${to > p.to ? p.to : to}&basis=${p.basis}`;
+  };
 
-function Total({ label, cents, strong }: { label: string; cents: number; strong?: boolean }) {
-  return (
+  const Totals = ({ label, values, strong }: { label: string; values: number[]; strong?: boolean }) => (
     <tr className={cn(strong ? "border-t-4 border-double border-text" : "border-t border-border")}>
-      <th scope="row" className={cn("py-2 text-left font-semibold", strong && "text-md")}>
+      <th scope="row" className={cn("py-2 pr-4 text-left font-semibold whitespace-nowrap", strong && "text-md")}>
         {label}
       </th>
-      <td className={cn("py-2 text-right font-semibold", strong && "text-md")}>
-        <Money cents={cents} />
-      </td>
+      {values.map((v, i) => (
+        <Amount key={i} cents={v} strong className={cn(strong && "text-md")} />
+      ))}
     </tr>
   );
-}
-
-export default async function ProfitAndLossPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ companyId: string }>;
-  searchParams: Promise<{ range?: string; from?: string; to?: string; basis?: string }>;
-}) {
-  const { companyId } = await params;
-  const sp = await searchParams;
-  const ctx = await requireCompany(companyId);
-  const [today, company] = await Promise.all([
-    companyToday(companyId),
-    one<{ fiscal_year_start_month: number; accounting_method: "accrual" | "cash" }>(
-      "select fiscal_year_start_month, accounting_method from companies where id = $1",
-      [companyId],
-    ),
-  ]);
-  const preset = (PRESETS.find(([k]) => k === sp.range)?.[0] ?? "fy_to_date") as Preset;
-  const valid = (d?: string) => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null);
-  let [from, to] = resolveRange(preset, today, company!.fiscal_year_start_month);
-  if (preset === "custom") {
-    from = valid(sp.from) ?? from;
-    to = valid(sp.to) ?? to;
-  }
-  const basis = sp.basis === "cash" || sp.basis === "accrual" ? sp.basis : company!.accounting_method;
-  const r = await profitAndLoss(companyId, from, to, basis);
-  const empty = [r.income, r.cogs, r.expenses, r.otherIncome, r.otherExpense].every((s) => s.rows.length === 0);
+  const Section = ({ s }: { s: ReportSection }) => {
+    if (s.rows.length === 0 && s.key !== "income" && s.key !== "expenses") return null;
+    return (
+      <>
+        <tr>
+          <th scope="rowgroup" colSpan={r.columns.length + 1} className="pt-4 pb-1 text-left font-semibold">
+            {s.title}
+          </th>
+        </tr>
+        {s.rows.map((row) => (
+          <tr key={row.accountId} className="hover:bg-row-hover">
+            <th scope="row" className="py-1 pr-4 text-left font-normal whitespace-nowrap" style={{ paddingLeft: 24 + row.depth * 20 }}>
+              {row.name}
+            </th>
+            {row.amounts.map((v, i) => (
+              <Amount key={i} cents={v} href={drill(row.accountId, i)} />
+            ))}
+          </tr>
+        ))}
+        <Totals label={`Total ${s.title.toLowerCase()}`} values={s.totals} />
+      </>
+    );
+  };
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <Link href={`/c/${companyId}/reports`} className="text-sm text-accent hover:underline">
-          ← Reports
-        </Link>
-        <h1 className="mt-1 text-xl font-bold">Profit and loss</h1>
-      </div>
-      <ReportToolbar from={from} to={to} basis={basis} preset={preset} />
-      <Card className="mx-auto w-full max-w-3xl px-8 py-8">
-        <header className="mb-6 text-center">
-          <p className="text-md font-semibold">{ctx.companyName}</p>
-          <p className="text-lg font-bold">Profit and loss</p>
-          <p className="text-text-muted">
-            {formatDate(from)} – {formatDate(to)} · {basis === "cash" ? "Cash basis" : "Accrual basis"}
-          </p>
-        </header>
-        {empty ? (
-          <p className="py-8 text-center text-text-muted">No income or expenses in this period.</p>
-        ) : (
-          <table className="w-full border-collapse">
-            <thead className="sr-only">
-              <tr>
-                <th>Account</th>
-                <th>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              <Section s={r.income} />
-              {r.cogs.rows.length > 0 && (
-                <>
-                  <Section s={r.cogs} />
-                  <Total label="Gross profit" cents={r.grossProfitCents} />
-                </>
-              )}
-              <Section s={r.expenses} />
-              <Total label="Net operating income" cents={r.netOperatingIncomeCents} />
-              {(r.otherIncome.rows.length > 0 || r.otherExpense.rows.length > 0) && (
-                <>
-                  <Section s={r.otherIncome} />
-                  <Section s={r.otherExpense} />
-                  <Total label="Net other income" cents={r.netOtherIncomeCents} />
-                </>
-              )}
-              <Total label="Net income" cents={r.netIncomeCents} strong />
-            </tbody>
-          </table>
-        )}
-      </Card>
-    </div>
+    <ReportFrame
+      companyId={companyId}
+      title="Profit and loss"
+      companyName={p.companyName}
+      subtitle={`${formatDate(p.from)} – ${formatDate(p.to)} · ${p.basis === "cash" ? "Cash basis" : "Accrual basis"}`}
+      wide={p.byMonth}
+      toolbar={<ReportToolbar from={p.from} to={p.to} basis={p.basis} preset={p.preset} columns={p.byMonth ? "months" : "total"} showColumns />}
+    >
+      {empty ? (
+        <p className="py-8 text-center text-text-muted">No income or expenses in this period.</p>
+      ) : (
+        <table className="w-full border-collapse">
+          <thead className={cn(!p.byMonth && "sr-only")}>
+            <tr className="border-b border-border text-xs text-text-muted uppercase">
+              <th className="py-2 text-left">Account</th>
+              {r.columns.map((c) => (
+                <th key={c} className="py-2 pl-4 text-right whitespace-nowrap">
+                  {monthLabel(c)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <Section s={r.income} />
+            {r.cogs.rows.length > 0 && (
+              <>
+                <Section s={r.cogs} />
+                <Totals label="Gross profit" values={r.grossProfit} />
+              </>
+            )}
+            <Section s={r.expenses} />
+            <Totals label="Net operating income" values={r.netOperatingIncome} />
+            {(r.otherIncome.rows.length > 0 || r.otherExpense.rows.length > 0) && (
+              <>
+                <Section s={r.otherIncome} />
+                <Section s={r.otherExpense} />
+                <Totals label="Net other income" values={r.netOtherIncome} />
+              </>
+            )}
+            <Totals label="Net income" values={r.netIncome} strong />
+          </tbody>
+        </table>
+      )}
+    </ReportFrame>
   );
 }

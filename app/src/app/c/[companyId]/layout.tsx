@@ -4,6 +4,7 @@ import { signOutAction } from "@/app/(auth)/actions";
 import { requireCompany } from "@/lib/authz";
 import { Nav } from "./nav";
 import { NewMenu } from "./new-menu";
+import { SearchBox } from "./search-box";
 
 export default async function CompanyLayout({
   children,
@@ -29,6 +30,7 @@ export default async function CompanyLayout({
         <header className="sticky top-0 z-30 flex h-[var(--header-height)] items-center gap-4 border-b border-border bg-bg px-6">
           <NewMenu companyId={companyId} />
           <p className="truncate font-semibold">{ctx.companyName}</p>
+          <SearchBox companyId={companyId} />
           <form action={signOutAction} className="ml-auto">
             <button type="submit" className="flex items-center gap-2 rounded-md px-2 py-1 text-text-muted hover:bg-row-hover">
               <LogOut className="size-4" aria-hidden /> Sign out

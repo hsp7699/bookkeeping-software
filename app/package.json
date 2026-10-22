@@ -1,12 +1,17 @@
 {
-  "name": "app",
+  "name": "books",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "node --env-file-if-exists=.env.local db/migrate.mjs",
+    "seed:demo": "tsx --conditions=react-server --env-file=.env.local scripts/seed-demo.ts",
+    "tokens": "node scripts/gen-tokens.mjs"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",

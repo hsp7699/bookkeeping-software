@@ -32,6 +32,9 @@
   --color-info-soft: #eaf2fb;
   --color-on-info-soft: #1d4e89;
   --color-negative-amount: #b42323;
+  --color-series-1: #2a78d6;
+  --color-series-2: #eb6834;
+  --color-chart-grid: #eef0f3;
   --font-sans: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   --text-xs: 0.75rem;
