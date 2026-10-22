@@ -37,6 +37,9 @@ const contactSchema = z.object({
   billingAddress: address,
   notes: z.string().max(4000).optional(),
   track1099: z.boolean().optional(),
+  taxId: z.string().trim().max(20).optional(),
+  taxExempt: z.boolean().optional(),
+  defaultTaxRateId: z.union([z.literal(""), z.string().uuid()]).optional(),
 });
 
 export async function saveContactAction(companyId: string, raw: unknown): Promise<ActionResult<{ id: string; displayName: string; email: string | null; termsId: string | null }>> {
@@ -50,22 +53,22 @@ export async function saveContactAction(companyId: string, raw: unknown): Promis
       [companyId, c.displayName, c.id ?? null],
     );
     if (dupe) return { ok: false, error: "Check the highlighted fields.", fieldErrors: { displayName: `A ${dupe.kind} with this name already exists. Names must be unique.` } };
-    const params = [companyId, c.kind, c.displayName, c.companyName || null, c.email ? [c.email] : [], c.phone || null, c.termsId || null, JSON.stringify(c.billingAddress), c.notes || null, c.track1099 ?? false];
+    const params = [companyId, c.kind, c.displayName, c.companyName || null, c.email ? [c.email] : [], c.phone || null, c.termsId || null, JSON.stringify(c.billingAddress), c.notes || null, c.track1099 ?? false, c.taxId || null, c.taxExempt ?? false, c.defaultTaxRateId || null];
     const row = c.id
       ? await one<{ id: string }>(
-          `update contacts set kind = $2, display_name = $3, company_name = $4, emails = $5, phone = $6, terms_id = $7, billing_address = $8, notes = $9, track_1099 = $10
-           where company_id = $1 and id = $11 returning id`,
+          `update contacts set kind = $2, display_name = $3, company_name = $4, emails = $5, phone = $6, terms_id = $7, billing_address = $8, notes = $9, track_1099 = $10, tax_id = $11, tax_exempt = $12, default_tax_rate_id = $13
+           where company_id = $1 and id = $14 returning id`,
           [...params, c.id],
         )
       : await one<{ id: string }>(
-          `insert into contacts (company_id, kind, display_name, company_name, emails, phone, terms_id, billing_address, notes, track_1099)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id`,
+          `insert into contacts (company_id, kind, display_name, company_name, emails, phone, terms_id, billing_address, notes, track_1099, tax_id, tax_exempt, default_tax_rate_id)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning id`,
           params,
         );
     if (!row) return { ok: false, error: "That record no longer exists." };
     await query(
       "insert into audit_events (company_id, user_id, entity, entity_id, action, after) values ($1, $2, 'contact', $3, $4, $5)",
-      [companyId, ctx.userId, row.id, c.id ? "update" : "create", JSON.stringify(c)],
+      [companyId, ctx.userId, row.id, c.id ? "update" : "create", JSON.stringify({ ...c, taxId: c.taxId ? "(set)" : undefined })],
     );
     revalidatePath(`/c/${companyId}`, "layout");
     return { ok: true, data: { id: row.id, displayName: c.displayName, email: c.email || null, termsId: c.termsId || null } };

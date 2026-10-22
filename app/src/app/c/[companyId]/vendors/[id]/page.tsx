@@ -23,9 +23,10 @@ export default async function VendorPage({ params }: { params: Promise<{ company
     billing_address: Record<string, string>;
     notes: string | null;
     track_1099: boolean;
+    tax_id: string | null;
     open_cents: number;
   }>(
-    `select c.display_name, c.company_name, c.emails[1] as email, c.phone, c.terms_id, c.billing_address, c.notes, c.track_1099,
+    `select c.display_name, c.company_name, c.emails[1] as email, c.phone, c.terms_id, c.billing_address, c.notes, c.track_1099, c.tax_id,
             coalesce((select sum(balance_cents) from transactions t where t.contact_id = c.id and t.type = 'bill' and t.status = 'posted'), 0) as open_cents
      from contacts c where c.company_id = $1 and c.id = $2 and c.kind = 'vendor'`,
     [companyId, id],
@@ -68,6 +69,7 @@ export default async function VendorPage({ params }: { params: Promise<{ company
               billingAddress: v.billing_address,
               notes: v.notes ?? undefined,
               track1099: v.track_1099,
+              taxId: v.tax_id ?? undefined,
             }}
           />
           <Button asChild>

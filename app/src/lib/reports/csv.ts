@@ -3,6 +3,7 @@ import { requireCompany } from "@/lib/authz";
 import { readParams, type ReportParams } from "./params";
 import { profitAndLoss } from "./pnl";
 import { aging, balanceSheet, generalLedger } from "./statements";
+import { cashFlow, expensesByVendor, salesByCustomer, salesByProduct, trialBalance, vendor1099 } from "./more";
 
 const money = (c: number) => (c / 100).toFixed(2);
 
@@ -21,7 +22,7 @@ export function toCsv(rows: (string | number | null)[][]): string {
     .join("\r\n");
 }
 
-type Builder = (companyId: string, sp: ReportParams & { view?: string; account?: string }) => Promise<{ name: string; rows: (string | number | null)[][] }>;
+type Builder = (companyId: string, sp: ReportParams & { view?: string; account?: string; year?: string }) => Promise<{ name: string; rows: (string | number | null)[][] }>;
 
 const BUILDERS: Record<string, Builder> = {
   "profit-and-loss": async (companyId, sp) => {
@@ -54,6 +55,46 @@ const BUILDERS: Record<string, Builder> = {
     }
     rows.push(["Total liabilities and equity", money(bs.totalLiabilities + bs.totalEquity)]);
     return { name: `balance-sheet-${p.asOf}`, rows };
+  },
+  "trial-balance": async (companyId, sp) => {
+    const p = await readParams(companyId, sp);
+    const tb = await trialBalance(companyId, p.asOf, p.basis, p.fyStartMonth);
+    return {
+      name: `trial-balance-${p.asOf}`,
+      rows: [[p.companyName], ["Trial balance", `as of ${p.asOf}`, p.basis], [], ["Account", "Debit", "Credit"], ...tb.rows.map((r) => [r.name, r.debit ? money(r.debit) : "", r.credit ? money(r.credit) : ""]), ["Total", money(tb.debit), money(tb.credit)]],
+    };
+  },
+  "cash-flow": async (companyId, sp) => {
+    const p = await readParams(companyId, sp);
+    const cf = await cashFlow(companyId, p.from, p.to, p.basis);
+    const rows: (string | number | null)[][] = [[p.companyName], ["Statement of cash flows", `${p.from} to ${p.to}`, p.basis], [], ["Operating activities"], ["  Net income", money(cf.netIncome)]];
+    for (const l of cf.operating) rows.push([`  ${l.name}`, money(l.amount)]);
+    rows.push(["Net cash from operating activities", money(cf.netOperating)], ["Investing activities"]);
+    for (const l of cf.investing) rows.push([`  ${l.name}`, money(l.amount)]);
+    rows.push(["Net cash from investing activities", money(cf.netInvesting)], ["Financing activities"]);
+    for (const l of cf.financing) rows.push([`  ${l.name}`, money(l.amount)]);
+    rows.push(["Net cash from financing activities", money(cf.netFinancing)], ["Net change in cash", money(cf.netChange)], ["Cash at the start", money(cf.cashStart)], ["Cash at the end", money(cf.cashEnd)]);
+    return { name: `cash-flow-${p.from}-${p.to}`, rows };
+  },
+  "sales-by-customer": async (companyId, sp) => {
+    const p = await readParams(companyId, sp);
+    const r = await salesByCustomer(companyId, p.from, p.to, p.basis);
+    return { name: `sales-by-customer-${p.from}-${p.to}`, rows: [["Customer", "Amount"], ...r.map((x) => [x.name, money(x.amount)])] };
+  },
+  "expenses-by-vendor": async (companyId, sp) => {
+    const p = await readParams(companyId, sp);
+    const r = await expensesByVendor(companyId, p.from, p.to, p.basis);
+    return { name: `expenses-by-vendor-${p.from}-${p.to}`, rows: [["Vendor", "Amount"], ...r.map((x) => [x.name, money(x.amount)])] };
+  },
+  "sales-by-product": async (companyId, sp) => {
+    const p = await readParams(companyId, sp);
+    const r = await salesByProduct(companyId, p.from, p.to);
+    return { name: `sales-by-product-${p.from}-${p.to}`, rows: [["Product or service", "Quantity", "Amount"], ...r.map((x) => [x.name, x.qty, money(x.amount)])] };
+  },
+  "vendor-1099": async (companyId, sp) => {
+    const year = Number(sp.year) || new Date().getFullYear();
+    const r = await vendor1099(companyId, year);
+    return { name: `1099-${year}`, rows: [["Vendor", "Tax ID", "Paid", "Over threshold"], ...r.rows.map((v) => [v.name, v.tax_id, money(v.paid_cents), v.paid_cents >= r.thresholdCents ? "Yes" : "No"])] };
   },
   "ar-aging": (companyId, sp) => agingCsv(companyId, sp, "ar"),
   "ap-aging": (companyId, sp) => agingCsv(companyId, sp, "ap"),

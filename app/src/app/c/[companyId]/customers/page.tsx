@@ -5,7 +5,7 @@ import { Card, Table, Td, Th, Tr } from "@/components/ui/table";
 import { requireCompany } from "@/lib/authz";
 import { cn } from "@/lib/cn";
 import { formatCents } from "@/lib/money";
-import { customerMoneyBar, listCustomers, listTerms } from "@/lib/queries";
+import { customerMoneyBar, listCustomers, listTaxRates, listTerms } from "@/lib/queries";
 import { NewCustomerButton } from "./new-customer-button";
 
 type Filter = "all" | "open" | "overdue";
@@ -21,7 +21,7 @@ export default async function CustomersPage({
   const { filter: f } = await searchParams;
   await requireCompany(companyId);
   const filter: Filter = f === "open" || f === "overdue" ? f : "all";
-  const [rows, bar, terms] = await Promise.all([listCustomers(companyId, filter), customerMoneyBar(companyId), listTerms(companyId)]);
+  const [rows, bar, terms, taxRates] = await Promise.all([listCustomers(companyId, filter), customerMoneyBar(companyId), listTerms(companyId), listTaxRates(companyId)]);
   const base = `/c/${companyId}/customers`;
 
   const segments = [
@@ -34,7 +34,7 @@ export default async function CustomersPage({
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">Customers</h1>
-        <NewCustomerButton companyId={companyId} terms={terms} />
+        <NewCustomerButton companyId={companyId} terms={terms} taxRates={taxRates} />
       </div>
 
       <Card className="grid grid-cols-1 gap-px overflow-hidden bg-border sm:grid-cols-3" aria-label="Money bar">

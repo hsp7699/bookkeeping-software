@@ -6,7 +6,7 @@ import { one, query } from "@/db";
 import { requireCompany } from "@/lib/authz";
 import { formatDate } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
-import { listTerms } from "@/lib/queries";
+import { listTaxRates, listTerms } from "@/lib/queries";
 import { TXN_LABEL, txnHref } from "@/lib/routes";
 import { EditCustomerButton } from "./edit-customer";
 
@@ -22,15 +22,17 @@ export default async function CustomerPage({ params }: { params: Promise<{ compa
     terms_id: string | null;
     billing_address: { line1?: string; line2?: string; city?: string; state?: string; zip?: string };
     notes: string | null;
+    tax_exempt: boolean;
+    default_tax_rate_id: string | null;
     open_cents: number;
   }>(
-    `select c.display_name, c.company_name, c.emails[1] as email, c.phone, c.terms_id, c.billing_address, c.notes,
+    `select c.display_name, c.company_name, c.emails[1] as email, c.phone, c.terms_id, c.billing_address, c.notes, c.tax_exempt, c.default_tax_rate_id,
             coalesce((select sum(balance_cents) from transactions t where t.contact_id = c.id and t.type = 'invoice' and t.status = 'posted'), 0) as open_cents
      from contacts c where c.company_id = $1 and c.id = $2 and c.kind = 'customer'`,
     [companyId, id],
   );
   if (!c) notFound();
-  const terms = await listTerms(companyId);
+  const [terms, taxRates] = await Promise.all([listTerms(companyId), listTaxRates(companyId)]);
   const txns = await query<{ id: string; type: string; number: string | null; txn_date: string; total_cents: number; balance_cents: number; status: string }>(
     `select id, type, number, txn_date, total_cents, balance_cents, status from transactions
      where company_id = $1 and contact_id = $2 order by txn_date desc, created_at desc limit 200`,
@@ -55,6 +57,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ compa
           <EditCustomerButton
             companyId={companyId}
             terms={terms}
+            taxRates={taxRates}
             customer={{
               id,
               displayName: c.display_name,
@@ -64,6 +67,8 @@ export default async function CustomerPage({ params }: { params: Promise<{ compa
               termsId: c.terms_id ?? undefined,
               billingAddress: c.billing_address,
               notes: c.notes ?? undefined,
+              taxExempt: c.tax_exempt,
+              defaultTaxRateId: c.default_tax_rate_id ?? undefined,
             }}
           />
           <Button asChild>

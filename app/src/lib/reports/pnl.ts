@@ -115,3 +115,58 @@ export async function profitAndLoss(companyId: string, from: string, to: string,
     netIncome: add(operating, other),
   };
 }
+
+/** The same-length period just before, or the same dates a year earlier. */
+export function comparisonRange(from: string, to: string, kind: "prev_period" | "prev_year"): [string, string] {
+  const d = (s: string) => new Date(`${s}T00:00:00Z`);
+  const iso = (x: Date) => x.toISOString().slice(0, 10);
+  if (kind === "prev_year") {
+    const f = d(from);
+    const t = d(to);
+    f.setUTCFullYear(f.getUTCFullYear() - 1);
+    t.setUTCFullYear(t.getUTCFullYear() - 1);
+    return [iso(f), iso(t)];
+  }
+  const days = Math.round((d(to).getTime() - d(from).getTime()) / 86400000) + 1;
+  const end = d(from);
+  end.setUTCDate(end.getUTCDate() - 1);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - days + 1);
+  return [iso(start), iso(end)];
+}
+
+/** Two P&Ls side by side: current, comparison, change, % change. */
+export async function profitAndLossCompare(companyId: string, from: string, to: string, basis: Basis, kind: "prev_period" | "prev_year"): Promise<ProfitAndLoss & { compareFrom: string; compareTo: string }> {
+  const [cf, ct] = comparisonRange(from, to, kind);
+  const [a, b] = await Promise.all([profitAndLoss(companyId, from, to, basis), profitAndLoss(companyId, cf, ct, basis)]);
+  const pct = (cur: number, prev: number) => (prev === 0 ? 0 : Math.round(((cur - prev) / Math.abs(prev)) * 10000)); // basis points
+  const four = (cur: number, prev: number) => [cur, prev, cur - prev, pct(cur, prev)];
+  const merge = (x: ReportSection, y: ReportSection): ReportSection => {
+    const ids = new Map<string, { name: string; depth: number }>();
+    for (const r of [...x.rows, ...y.rows]) ids.set(r.accountId, { name: r.name, depth: r.depth });
+    const get = (s: ReportSection, id: string) => s.rows.find((r) => r.accountId === id)?.amounts[0] ?? 0;
+    return {
+      key: x.key,
+      title: x.title,
+      rows: [...ids].map(([id, m]) => ({ accountId: id, name: m.name, depth: m.depth, amounts: four(get(x, id), get(y, id)) })),
+      totals: four(x.totals[0], y.totals[0]),
+    };
+  };
+  return {
+    from,
+    to,
+    basis,
+    columns: ["Current", "Comparison", "Change", "% change"],
+    income: merge(a.income, b.income),
+    cogs: merge(a.cogs, b.cogs),
+    expenses: merge(a.expenses, b.expenses),
+    otherIncome: merge(a.otherIncome, b.otherIncome),
+    otherExpense: merge(a.otherExpense, b.otherExpense),
+    grossProfit: four(a.grossProfit[0], b.grossProfit[0]),
+    netOperatingIncome: four(a.netOperatingIncome[0], b.netOperatingIncome[0]),
+    netOtherIncome: four(a.netOtherIncome[0], b.netOtherIncome[0]),
+    netIncome: four(a.netIncome[0], b.netIncome[0]),
+    compareFrom: cf,
+    compareTo: ct,
+  };
+}

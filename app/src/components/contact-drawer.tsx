@@ -9,6 +9,9 @@ import { saveContactAction } from "@/app/c/[companyId]/actions";
 export interface CustomerDraft {
   id?: string;
   track1099?: boolean;
+  taxId?: string;
+  taxExempt?: boolean;
+  defaultTaxRateId?: string;
   displayName: string;
   companyName?: string;
   email?: string;
@@ -25,10 +28,11 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   initial?: CustomerDraft;
   terms: { id: string; name: string }[];
+  taxRates?: { id: string; name: string }[];
   onSaved?: (c: { id: string; displayName: string; email: string | null; termsId: string | null }) => void;
 }
 
-export function CustomerDrawer({ kind = "customer", companyId, open, onOpenChange, initial, terms, onSaved }: Props) {
+export function CustomerDrawer({ kind = "customer", companyId, open, onOpenChange, initial, terms, taxRates = [], onSaved }: Props) {
   const noun = kind === "customer" ? "customer" : "vendor";
   const [pending, start] = useTransition();
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -41,6 +45,9 @@ export function CustomerDrawer({ kind = "customer", companyId, open, onOpenChang
       id: initial?.id,
       kind,
       track1099: f.get("track1099") === "on",
+      taxId: s("taxId"),
+      taxExempt: f.get("taxExempt") === "on",
+      defaultTaxRateId: s("defaultTaxRateId"),
       displayName: s("displayName"),
       companyName: s("companyName"),
       email: s("email"),
@@ -134,6 +141,31 @@ export function CustomerDrawer({ kind = "customer", companyId, open, onOpenChang
             <Input name="zip" aria-label="ZIP code" placeholder="ZIP" defaultValue={a.zip} />
           </div>
         </fieldset>
+        {kind === "customer" && (
+          <div className="grid grid-cols-2 items-end gap-4">
+            <Field label="Default sales tax">
+              {(p) => (
+                <NativeSelect {...p} name="defaultTaxRateId" defaultValue={initial?.defaultTaxRateId ?? ""}>
+                  <option value="">Company default (none)</option>
+                  {taxRates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </NativeSelect>
+              )}
+            </Field>
+            <label className="flex h-9 items-center gap-2">
+              <input type="checkbox" name="taxExempt" defaultChecked={initial?.taxExempt} className="size-4 accent-[var(--color-accent)]" />
+              Tax exempt
+            </label>
+          </div>
+        )}
+        {kind === "vendor" && (
+          <Field label="Tax ID (EIN or SSN)" hint="Needed for 1099s.">
+            {(p) => <Input {...p} name="taxId" defaultValue={initial?.taxId} autoComplete="off" />}
+          </Field>
+        )}
         {kind === "vendor" && (
           <label className="flex items-center gap-2">
             <input type="checkbox" name="track1099" defaultChecked={initial?.track1099} className="size-4 accent-[var(--color-accent)]" />

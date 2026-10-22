@@ -9,6 +9,22 @@ const groups: { title: string; reports: { slug: string; name: string; blurb: str
     reports: [
       { slug: "profit-and-loss", name: "Profit and loss", blurb: "Income, expenses and net income for a period.", ready: true },
       { slug: "balance-sheet", name: "Balance sheet", blurb: "What you own and owe on a date.", ready: true },
+      { slug: "cash-flow", name: "Statement of cash flows", blurb: "Where cash came from and went.", ready: true },
+      { slug: "profit-and-loss?compare=prev_year", name: "Profit and loss vs last year", blurb: "This period next to the same period last year.", ready: true },
+    ],
+  },
+  {
+    title: "Sales and customers",
+    reports: [
+      { slug: "sales-by-customer", name: "Sales by customer", blurb: "Income from each customer.", ready: true },
+      { slug: "sales-by-product", name: "Sales by product or service", blurb: "Quantity and amount sold of each.", ready: true },
+    ],
+  },
+  {
+    title: "Expenses and vendors",
+    reports: [
+      { slug: "expenses-by-vendor", name: "Expenses by vendor", blurb: "What you spent with each vendor.", ready: true },
+      { slug: "vendor-1099", name: "1099 vendor payments", blurb: "Payments to vendors you track for 1099.", ready: true },
     ],
   },
   {
@@ -29,6 +45,7 @@ const groups: { title: string; reports: { slug: string; name: string; blurb: str
     title: "For your accountant",
     reports: [
       { slug: "general-ledger", name: "General ledger", blurb: "Every ledger entry by account, with running balances.", ready: true },
+      { slug: "trial-balance", name: "Trial balance", blurb: "Every account's balance; debits equal credits.", ready: true },
       { slug: "profit-and-loss?columns=months", name: "Profit and loss by month", blurb: "Income and expenses month by month.", ready: true },
     ],
   },

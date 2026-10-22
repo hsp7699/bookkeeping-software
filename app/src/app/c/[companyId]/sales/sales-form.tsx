@@ -49,7 +49,7 @@ interface Props {
   moneyAccounts: { id: string; name: string; system_role: string | null }[];
   companyId: string;
   today: string;
-  customers: { id: string; display_name: string; email: string | null; terms_id: string | null }[];
+  customers: { id: string; display_name: string; email: string | null; terms_id: string | null; tax_exempt?: boolean; default_tax_rate_id?: string | null; parent_id?: string | null }[];
   items: ItemOption[];
   terms: { id: string; name: string; due_days: number | null }[];
   taxRates: { id: string; name: string; rate_bp: number }[];
@@ -140,6 +140,8 @@ export function SalesForm(props: Props) {
     setContactId(id);
     const c = customers.find((x) => x.id === id);
     if (c) {
+      if (c.tax_exempt) setTaxRateId("");
+      else if (c.default_tax_rate_id) setTaxRateId(c.default_tax_rate_id);
       if (c.email) setEmail(c.email);
       if (c.terms_id) {
         setTermsId(c.terms_id);
@@ -505,7 +507,14 @@ export function SalesForm(props: Props) {
             </div>
             <div className="flex items-center justify-between gap-4">
               <dt>
-                <NativeSelect aria-label="Sales tax rate" value={taxRateId} onChange={(e) => setTaxRateId(e.target.value)} className="w-48">
+                <NativeSelect
+                  aria-label="Sales tax rate"
+                  value={taxRateId}
+                  disabled={!!customers.find((c) => c.id === contactId)?.tax_exempt}
+                  title={customers.find((c) => c.id === contactId)?.tax_exempt ? "This customer is tax exempt" : undefined}
+                  onChange={(e) => setTaxRateId(e.target.value)}
+                  className="w-48"
+                >
                   <option value="">No sales tax</option>
                   {props.taxRates.map((t) => (
                     <option key={t.id} value={t.id}>
@@ -586,8 +595,9 @@ export function SalesForm(props: Props) {
         onOpenChange={(o) => !o && setCustomerDrawer(null)}
         initial={{ displayName: customerDrawer ?? "" }}
         terms={props.terms}
+        taxRates={props.taxRates}
         onSaved={(c) => {
-          setCustomers((cs) => [...cs, { id: c.id, display_name: c.displayName, email: c.email, terms_id: c.termsId }]);
+          setCustomers((cs) => [...cs, { id: c.id, display_name: c.displayName, email: c.email, terms_id: c.termsId, tax_exempt: false, default_tax_rate_id: null, parent_id: null }]);
           setContactId(c.id);
           if (c.email) setEmail(c.email);
           if (c.termsId) {

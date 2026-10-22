@@ -53,7 +53,13 @@ export function ReportToolbar({
       }
     } else q.set("asOf", next.asOf ?? a);
     if (showBasis) q.set("basis", next.basis ?? b);
-    if (showColumns) q.set("columns", next.columns ?? c);
+    if (showColumns) {
+      const col = next.columns ?? c;
+      q.delete("columns");
+      q.delete("compare");
+      if (col === "months") q.set("columns", "months");
+      else if (col === "prev_period" || col === "prev_year") q.set("compare", col);
+    }
     router.push(`?${q.toString()}`);
   }
 
@@ -99,11 +105,13 @@ export function ReportToolbar({
         </Field>
       )}
       {showColumns && (
-        <Field label="Columns" className="w-40">
+        <Field label="Columns" className="w-64">
           {(props) => (
             <NativeSelect {...props} value={c} onChange={(e) => { setC(e.target.value); run({ columns: e.target.value }); }}>
               <option value="total">Total only</option>
               <option value="months">Months</option>
+              <option value="prev_period">Compare: previous period</option>
+              <option value="prev_year">Compare: same period last year</option>
             </NativeSelect>
           )}
         </Field>

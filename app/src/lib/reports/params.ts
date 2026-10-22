@@ -11,6 +11,7 @@ export interface ReportParams {
   asOf?: string;
   basis?: string;
   columns?: string;
+  compare?: string;
 }
 
 const isDate = (d?: string) => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null);
@@ -37,5 +38,6 @@ export async function readParams(companyId: string, sp: ReportParams, defaultPre
     asOf: isDate(sp.asOf) ?? today,
     basis: (sp.basis === "cash" || sp.basis === "accrual" ? sp.basis : company!.accounting_method) as Basis,
     byMonth: sp.columns === "months",
+    compare: (sp.compare === "prev_period" || sp.compare === "prev_year" ? sp.compare : null) as "prev_period" | "prev_year" | null,
   };
 }

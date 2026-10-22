@@ -292,6 +292,10 @@ export async function saveInDb(db: PoolClient, companyId: string, userId: string
   }
 
   let taxRateBp: number | null = null;
+  if (input.taxRateId && input.contactId && SALES_FORMS.includes(input.type)) {
+    const ex = await one<{ tax_exempt: boolean }>("select tax_exempt from contacts where id = $1", [input.contactId], db);
+    if (ex?.tax_exempt) throw new UserError("This customer is tax exempt, so this can't charge sales tax.");
+  }
   if (input.taxRateId) {
     const r = await one<{ rate_bp: number }>("select rate_bp from tax_rates where company_id = $1 and id = $2", [companyId, input.taxRateId], db);
     if (!r) throw new UserError("That tax rate no longer exists.");

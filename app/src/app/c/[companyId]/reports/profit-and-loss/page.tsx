@@ -3,11 +3,15 @@ import { requireCompany } from "@/lib/authz";
 import { cn } from "@/lib/cn";
 import { formatDate } from "@/lib/dates";
 import { readParams, type ReportParams } from "@/lib/reports/params";
-import { profitAndLoss, type ReportSection } from "@/lib/reports/pnl";
+import { profitAndLoss, profitAndLossCompare, type ReportSection } from "@/lib/reports/pnl";
 import { ReportToolbar } from "../report-toolbar";
 
+function Pct({ bp, strong }: { bp: number; strong?: boolean }) {
+  return <td className={cn("num py-1 pl-4 text-text-muted", strong && "font-semibold")}>{bp ? `${(bp / 100).toFixed(1)}%` : ""}</td>;
+}
+
 function monthLabel(m: string) {
-  if (m === "Total") return "Total";
+  if (!/^\d{4}-\d{2}$/.test(m)) return m;
   const [y, mo] = m.split("-").map(Number);
   return new Date(Date.UTC(y, mo - 1, 1)).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 }
@@ -16,9 +20,13 @@ export default async function ProfitAndLossPage({ params, searchParams }: { para
   const { companyId } = await params;
   await requireCompany(companyId);
   const p = await readParams(companyId, await searchParams);
-  const r = await profitAndLoss(companyId, p.from, p.to, p.basis, p.byMonth);
+  const cmp = p.compare && !p.byMonth ? await profitAndLossCompare(companyId, p.from, p.to, p.basis, p.compare) : null;
+  const r = cmp ?? (await profitAndLoss(companyId, p.from, p.to, p.basis, p.byMonth));
+  // in compare mode the 4th column is a percentage (basis points), not money
+  const isPct = (i: number) => !!cmp && i === 3;
   const empty = [r.income, r.cogs, r.expenses, r.otherIncome, r.otherExpense].every((s) => s.rows.length === 0);
   const drill = (accountId: string, col: number) => {
+    if (cmp) return col === 0 ? `/c/${companyId}/reports/transactions?account=${accountId}&from=${p.from}&to=${p.to}&basis=${p.basis}` : col === 1 ? `/c/${companyId}/reports/transactions?account=${accountId}&from=${cmp.compareFrom}&to=${cmp.compareTo}&basis=${p.basis}` : undefined;
     const [from, to] =
       r.columns[col] === "Total"
         ? [p.from, p.to]
@@ -31,9 +39,7 @@ export default async function ProfitAndLossPage({ params, searchParams }: { para
       <th scope="row" className={cn("py-2 pr-4 text-left font-semibold whitespace-nowrap", strong && "text-md")}>
         {label}
       </th>
-      {values.map((v, i) => (
-        <Amount key={i} cents={v} strong className={cn(strong && "text-md")} />
-      ))}
+      {values.map((v, i) => (isPct(i) ? <Pct key={i} bp={v} strong /> : <Amount key={i} cents={v} strong className={cn(strong && "text-md")} />))}
     </tr>
   );
   const Section = ({ s }: { s: ReportSection }) => {
@@ -50,9 +56,7 @@ export default async function ProfitAndLossPage({ params, searchParams }: { para
             <th scope="row" className="py-1 pr-4 text-left font-normal whitespace-nowrap" style={{ paddingLeft: 24 + row.depth * 20 }}>
               {row.name}
             </th>
-            {row.amounts.map((v, i) => (
-              <Amount key={i} cents={v} href={drill(row.accountId, i)} />
-            ))}
+            {row.amounts.map((v, i) => (isPct(i) ? <Pct key={i} bp={v} /> : <Amount key={i} cents={v} href={drill(row.accountId, i)} />))}
           </tr>
         ))}
         <Totals label={`Total ${s.title.toLowerCase()}`} values={s.totals} />
@@ -65,15 +69,15 @@ export default async function ProfitAndLossPage({ params, searchParams }: { para
       companyId={companyId}
       title="Profit and loss"
       companyName={p.companyName}
-      subtitle={`${formatDate(p.from)} – ${formatDate(p.to)} · ${p.basis === "cash" ? "Cash basis" : "Accrual basis"}`}
-      wide={p.byMonth}
-      toolbar={<ReportToolbar from={p.from} to={p.to} basis={p.basis} preset={p.preset} columns={p.byMonth ? "months" : "total"} showColumns />}
+      subtitle={`${formatDate(p.from)} – ${formatDate(p.to)}${cmp ? ` compared with ${formatDate(cmp.compareFrom)} – ${formatDate(cmp.compareTo)}` : ""} · ${p.basis === "cash" ? "Cash basis" : "Accrual basis"}`}
+      wide={p.byMonth || !!cmp}
+      toolbar={<ReportToolbar from={p.from} to={p.to} basis={p.basis} preset={p.preset} columns={p.byMonth ? "months" : cmp ? p.compare! : "total"} showColumns />}
     >
       {empty ? (
         <p className="py-8 text-center text-text-muted">No income or expenses in this period.</p>
       ) : (
         <table className="w-full border-collapse">
-          <thead className={cn(!p.byMonth && "sr-only")}>
+          <thead className={cn(!p.byMonth && !cmp && "sr-only")}>
             <tr className="border-b border-border text-xs text-text-muted uppercase">
               <th className="py-2 text-left">Account</th>
               {r.columns.map((c) => (

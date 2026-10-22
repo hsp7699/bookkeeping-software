@@ -17,6 +17,9 @@ export const TXN_LABEL: Record<string, string> = {
   transfer: "Transfer",
   journal_entry: "Journal entry",
   opening_balance: "Opening balance",
+  sales_tax_payment: "Sales tax payment",
+  estimate: "Estimate",
+  purchase_order: "Purchase order",
 };
 
 const PATH: Record<string, string> = {
@@ -35,9 +38,13 @@ const PATH: Record<string, string> = {
   transfer: "transfers",
   journal_entry: "journal-entries",
   opening_balance: "journal-entries",
+  sales_tax_payment: "taxes",
+  estimate: "estimates",
+  purchase_order: "purchase-orders",
 };
 
 export function txnHref(companyId: string, type: string, id: string): string {
+  if (type === "sales_tax_payment") return `/c/${companyId}/taxes`;
   return `/c/${companyId}/${PATH[type] ?? "invoices"}/${id}`;
 }
 

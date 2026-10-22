@@ -56,8 +56,8 @@ export function customerMoneyBar(companyId: string) {
 }
 
 export function listCustomerOptions(companyId: string) {
-  return query<{ id: string; display_name: string; email: string | null; terms_id: string | null }>(
-    "select id, display_name, emails[1] as email, terms_id from contacts where company_id = $1 and kind = 'customer' and active order by lower(display_name)",
+  return query<{ id: string; display_name: string; email: string | null; terms_id: string | null; tax_exempt: boolean; default_tax_rate_id: string | null; parent_id: string | null }>(
+    "select id, display_name, emails[1] as email, terms_id, tax_exempt, default_tax_rate_id, parent_id from contacts where company_id = $1 and kind = 'customer' and active order by lower(display_name)",
     [companyId],
   );
 }

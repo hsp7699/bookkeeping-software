@@ -9,6 +9,7 @@ import {
   Landmark,
   ListChecks,
   Package,
+  Percent,
   Receipt,
   Scale,
   Settings,
@@ -58,6 +59,7 @@ const groups: { label?: string; items: Item[] }[] = [
     items: [
       { href: "/accounts", label: "Chart of accounts", icon: BookOpen },
       { href: "/reports", label: "Reports", icon: BarChart3 },
+      { href: "/taxes", label: "Sales tax", icon: Percent },
       { href: "/audit", label: "Audit log", icon: History },
     ],
   },
