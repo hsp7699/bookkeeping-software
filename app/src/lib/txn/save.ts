@@ -1,20 +1,20 @@
 import "server-only";
 import type { PoolClient } from "pg";
 import { z } from "zod";
-import { one, query, tx } from "@/db";
+import { one, query, tx, type TxOptions } from "@/db";
 import { lineAmount } from "@/lib/money";
-import { post, PostingError, type PostingLine, type SystemAccounts } from "@/lib/posting";
+import { post, PostingError, type PostingInput, type PostingLine, type SystemAccounts, type TxnType } from "@/lib/posting";
 
-// Saves a transaction: validates, resolves item lines to accounts, posts
-// ledger entries, keeps open balances right, numbers it, audits it. One
-// database transaction; the balance trigger checks the ledger at commit.
+// One pipeline for every transaction type: validate, resolve item lines to
+// accounts, post ledger entries, keep open balances right, number, audit.
+// Runs in one database transaction; the balance trigger checks at commit.
 
 export class UserError extends Error {}
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a valid date.");
 const uuid = z.string().uuid();
 
-const salesLine = z.object({
+const line = z.object({
   itemId: uuid.nullish(),
   accountId: uuid.nullish(),
   description: z.string().max(4000).nullish(),
@@ -22,43 +22,79 @@ const salesLine = z.object({
   rateCents: z.number().finite().nullish(),
   amountCents: z.number().int(),
   taxable: z.boolean().default(false),
+  side: z.enum(["debit", "credit"]).nullish(),
+  contactId: uuid.nullish(),
 });
 
-export const invoiceInput = z.object({
-  type: z.literal("invoice"),
+export const txnInput = z.object({
+  type: z.enum([
+    "invoice", "sales_receipt", "payment", "credit_memo", "refund_receipt",
+    "expense", "check", "bill", "bill_payment", "vendor_credit", "credit_card_credit",
+    "deposit", "transfer", "journal_entry", "opening_balance",
+  ]),
   id: uuid.optional(),
   ifUpdatedAt: z.string().optional(),
-  contactId: uuid,
+  contactId: uuid.nullish(),
   txnDate: dateStr,
   dueDate: dateStr.nullish(),
   termsId: uuid.nullish(),
   number: z.string().trim().max(21).nullish(),
-  lines: z.array(salesLine).min(1, "Add at least one line."),
+  /** money side: deposit-to, paid-from, card, transfer-to, opening-balance account */
+  accountId: uuid.nullish(),
+  /** transfer: from-account */
+  fromAccountId: uuid.nullish(),
+  /** payment, bill payment, transfer, opening balance */
+  amountCents: z.number().int().nullish(),
+  paymentMethod: z.string().max(40).nullish(),
+  lines: z.array(line).default([]),
   discountCents: z.number().int().min(0).default(0),
   taxRateId: uuid.nullish(),
   memo: z.string().max(4000).nullish(),
   privateNote: z.string().max(4000).nullish(),
   emailTo: z.array(z.string().email()).default([]),
-});
-
-export const paymentInput = z.object({
-  type: z.literal("payment"),
-  id: uuid.optional(),
-  ifUpdatedAt: z.string().optional(),
-  contactId: uuid,
-  txnDate: dateStr,
-  depositToId: uuid.nullish(), // null -> Undeposited Funds
-  paymentMethod: z.string().max(40).nullish(),
-  number: z.string().trim().max(21).nullish(), // reference no.
-  amountCents: z.number().int().positive("Enter the amount received."),
+  /** payment -> invoices, bill payment -> bills */
   applications: z.array(z.object({ txnId: uuid, amountCents: z.number().int().positive() })).default([]),
-  memo: z.string().max(4000).nullish(),
+  /** deposit: payments and sales receipts sitting in Undeposited Funds */
+  depositSourceIds: z.array(uuid).default([]),
+  source: z.enum(["manual", "bank_feed", "import", "recurring", "system"]).default("manual"),
 });
+export type TxnInput = z.input<typeof txnInput>;
+type Input = z.infer<typeof txnInput>;
 
-export const saveInput = z.discriminatedUnion("type", [invoiceInput, paymentInput]);
-export type SaveInput = z.infer<typeof saveInput>;
+const CUSTOMER_TYPES: TxnType[] = ["invoice", "sales_receipt", "payment", "credit_memo", "refund_receipt"];
+const VENDOR_TYPES: TxnType[] = ["bill", "bill_payment", "vendor_credit"];
+const SALES_FORMS: TxnType[] = ["invoice", "sales_receipt", "credit_memo", "refund_receipt"];
+const PURCHASE_FORMS: TxnType[] = ["expense", "check", "bill", "vendor_credit", "credit_card_credit"];
+const NUMBERED: TxnType[] = ["invoice", "sales_receipt", "credit_memo", "refund_receipt", "journal_entry"];
 
-async function systemAccounts(db: PoolClient, companyId: string): Promise<SystemAccounts> {
+/** Which account types may sit on the money side of each form. */
+const MONEY_SIDE: Partial<Record<TxnType, string[]>> = {
+  sales_receipt: ["bank", "other_current_asset"],
+  payment: ["bank", "other_current_asset"],
+  refund_receipt: ["bank", "credit_card"],
+  expense: ["bank", "credit_card", "other_current_asset", "other_current_liability"],
+  check: ["bank"],
+  credit_card_credit: ["credit_card"],
+  bill_payment: ["bank", "credit_card"],
+  deposit: ["bank", "other_current_asset"],
+  transfer: ["bank", "credit_card", "other_current_asset", "other_current_liability", "long_term_liability", "equity"],
+  opening_balance: ["bank", "credit_card", "accounts_receivable", "other_current_asset", "fixed_asset", "other_asset", "accounts_payable", "other_current_liability", "long_term_liability", "equity"],
+};
+
+const MONEY_SIDE_MSG: Partial<Record<TxnType, string>> = {
+  sales_receipt: "Deposit to a bank account or Undeposited Funds.",
+  payment: "Deposit to a bank account or Undeposited Funds.",
+  refund_receipt: "Pay the refund from a bank or credit card account.",
+  expense: "Choose the bank or credit card it was paid from.",
+  check: "Choose a bank account.",
+  credit_card_credit: "Choose a credit card account.",
+  bill_payment: "Pay from a bank or credit card account.",
+  deposit: "Deposit to a bank account.",
+  transfer: "Choose balance sheet accounts for a transfer.",
+  opening_balance: "Opening balances go on balance sheet accounts.",
+};
+
+export async function systemAccounts(db: PoolClient, companyId: string): Promise<SystemAccounts> {
   const rows = await query<{ id: string; system_role: string }>(
     "select id, system_role from accounts where company_id = $1 and system_role is not null",
     [companyId],
@@ -87,69 +123,35 @@ async function nextNumber(db: PoolClient, companyId: string, type: string): Prom
     [companyId, type],
     db,
   );
-  // lock and bump; skip numbers the user typed by hand
   let n = row!.next_value;
-  for (;;) {
-    const taken = await one("select 1 from transactions where company_id = $1 and type = $2 and number = $3", [companyId, type, String(n)], db);
-    if (!taken) break;
-    n++;
-  }
+  // skip numbers the user typed by hand
+  while (await one("select 1 from transactions where company_id = $1 and type = $2 and number = $3", [companyId, type, String(n)], db)) n++;
   await query("update number_sequences set next_value = $3 where company_id = $1 and type = $2", [companyId, type, n + 1], db);
   return String(n);
 }
 
-/** Recompute the open balance of invoices/bills from their applications. */
-async function refreshBalances(db: PoolClient, txnIds: string[]) {
+/** Recompute open balances from applications. Invoices/bills: total − applied. Payments: unapplied. */
+export async function refreshBalances(db: PoolClient, txnIds: string[]) {
   if (txnIds.length === 0) return;
   await query(
-    `update transactions t set balance_cents = case when t.status = 'voided' then 0 else
-        greatest(t.total_cents - coalesce((select sum(a.amount_cents) from payment_applications a where a.target_txn_id = t.id), 0), 0) end
+    `update transactions t set balance_cents = case
+        when t.status = 'voided' then 0
+        when t.type in ('invoice','bill') then
+          greatest(t.total_cents - coalesce((select sum(a.amount_cents) from payment_applications a where a.target_txn_id = t.id), 0), 0)
+        when t.type in ('payment','bill_payment') then
+          greatest(t.total_cents - coalesce((select sum(a.amount_cents) from payment_applications a where a.source_txn_id = t.id), 0), 0)
+        when t.type in ('credit_memo','vendor_credit') then t.total_cents
+        else 0 end
      where t.id = any($1::uuid[])`,
     [txnIds],
     db,
   );
 }
 
-async function lockExisting(db: PoolClient, companyId: string, id: string, type: string, ifUpdatedAt?: string) {
-  const row = await one<{ id: string; type: string; status: string; unchanged: boolean }>(
-    `select id, type, status, ($3::text is null or updated_at = $3::timestamptz) as unchanged
-     from transactions where company_id = $1 and id = $2 for update`,
-    [companyId, id, ifUpdatedAt ?? null],
-    db,
-  );
-  if (!row || row.type !== type) throw new UserError("This transaction no longer exists.");
-  if (row.status === "voided") throw new UserError("A voided transaction can't be edited.");
-  if (!row.unchanged) {
-    throw new UserError("Someone else changed this transaction while you were editing. Reload to see their changes.");
-  }
-  return row;
-}
-
-async function writeEntries(
-  db: PoolClient,
-  companyId: string,
-  txnId: string,
-  date: string,
-  entries: ReturnType<typeof post>["entries"],
-  lineIds: (string | null)[],
-) {
-  // Replace unreconciled entries. Reconciled ones are protected by a trigger.
-  await query("delete from ledger_entries where transaction_id = $1", [txnId], db);
-  for (const e of entries) {
-    const lineId = e.lineId != null ? lineIds[Number(e.lineId)] ?? null : null;
-    await query(
-      `insert into ledger_entries (company_id, transaction_id, line_id, account_id, entry_date, debit_cents, credit_cents, contact_id, memo)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [companyId, txnId, lineId, e.accountId, date, e.debitCents, e.creditCents, e.contactId, e.memo],
-      db,
-    );
-  }
-}
-
 async function audit(db: PoolClient, companyId: string, userId: string, id: string, action: string, before: unknown, after: unknown) {
   await query(
     `insert into audit_events (company_id, user_id, entity, entity_id, action, before, after) values ($1, $2, 'transaction', $3, $4, $5, $6)`,
-    [companyId, userId, id, action, before ? JSON.stringify(before) : null, JSON.stringify(after)],
+    [companyId, userId, id, action, before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null],
     db,
   );
 }
@@ -163,79 +165,111 @@ async function snapshot(db: PoolClient, id: string) {
   );
 }
 
-export async function saveTransaction(companyId: string, userId: string, raw: unknown): Promise<{ id: string; number: string | null }> {
-  const parsed = saveInput.safeParse(raw);
+function translateDbError(e: unknown): unknown {
+  const err = e as { code?: string; constraint?: string; message?: string };
+  if (err.code === "23505" && err.constraint === "txn_number_unique") return new UserError("That number is already used. Pick another.");
+  if (err.code === "23514" && err.message?.includes("closed period")) return new UserError(err.message.replace(/^date/, "The date").replace(/^transaction dated/, "This transaction, dated") + ". Enter the close-books password to change it.");
+  if (err.code === "23514" && err.message?.includes("reconciled")) return new UserError("Part of this transaction is reconciled. Changing it would throw off your reconciliation.");
+  if (err.code === "23503" && err.message?.includes("payment_applications")) return new UserError("Payments are applied to this. Delete or edit those payments first.");
+  if (err.code === "23503" && err.message?.includes("deposit_items")) return new UserError("This payment is part of a bank deposit. Remove it from the deposit first.");
+  return e;
+}
+
+export async function saveTransaction(
+  companyId: string,
+  userId: string,
+  raw: unknown,
+  opts: TxOptions = {},
+): Promise<{ id: string; number: string | null }> {
+  const parsed = txnInput.safeParse(raw);
   if (!parsed.success) throw new UserError(parsed.error.issues[0]?.message ?? "Check the form for errors.");
-  const input = parsed.data;
   try {
-    return await tx(async (db) => {
-      const sys = await systemAccounts(db, companyId);
-      const before = input.id ? await snapshot(db, input.id) : null;
-      if (input.id) await lockExisting(db, companyId, input.id, input.type, input.ifUpdatedAt);
-      const contact = await one<{ kind: string; active: boolean }>(
-        "select kind, active from contacts where company_id = $1 and id = $2",
-        [companyId, input.contactId],
-        db,
-      );
-      if (!contact) throw new UserError("Choose a customer.");
-      if (contact.kind !== "customer") throw new UserError("That name isn't a customer.");
-
-      let result: { id: string; number: string | null };
-      if (input.type === "invoice") result = await saveInvoice(db, companyId, userId, input, sys);
-      else result = await savePayment(db, companyId, userId, input, sys);
-
-      await audit(db, companyId, userId, result.id, before ? "update" : "create", before, await snapshot(db, result.id));
-      return result;
-    });
+    return await tx((db) => saveInDb(db, companyId, userId, parsed.data), opts);
   } catch (e) {
     if (e instanceof PostingError) throw new UserError(e.message);
     throw translateDbError(e);
   }
 }
 
-function translateDbError(e: unknown): unknown {
-  const err = e as { code?: string; constraint?: string; message?: string };
-  if (err.code === "23505" && err.constraint === "txn_number_unique") return new UserError("That number is already used. Pick another.");
-  if (err.code === "23514" && err.message?.includes("closed period")) return new UserError(err.message.replace(/^date/, "The date"));
-  if (err.code === "23514" && err.message?.includes("reconciled")) return new UserError("Part of this transaction is reconciled and can't change.");
-  return e;
-}
+/** For callers that already hold a database transaction (bank feed "Add"). */
+export async function saveInDb(db: PoolClient, companyId: string, userId: string, input: Input): Promise<{ id: string; number: string | null }> {
+  const sys = await systemAccounts(db, companyId);
+  const before = input.id ? await snapshot(db, input.id) : null;
 
-async function saveInvoice(
-  db: PoolClient,
-  companyId: string,
-  userId: string,
-  input: z.infer<typeof invoiceInput>,
-  sys: SystemAccounts,
-) {
-  // Resolve each line to an income account
-  const itemIds = input.lines.map((l) => l.itemId).filter((x): x is string => !!x);
-  const items = itemIds.length
-    ? await query<{ id: string; income_account_id: string | null; name: string }>(
-        "select id, income_account_id, name from items where company_id = $1 and id = any($2::uuid[])",
-        [companyId, itemIds],
-        db,
-      )
-    : [];
-  const itemMap = new Map(items.map((i) => [i.id, i]));
-  const lines: (PostingLine & { itemId: string | null; qty: number | null; rateCents: number | null })[] = input.lines.map((l, idx) => {
-    let accountId = l.accountId ?? null;
-    if (l.itemId) {
-      const item = itemMap.get(l.itemId);
-      if (!item) throw new UserError(`Line ${idx + 1}: that product or service no longer exists.`);
-      if (!item.income_account_id) throw new UserError(`Line ${idx + 1}: ${item.name} has no income account.`);
-      accountId = item.income_account_id;
+  if (input.id) {
+    const row = await one<{ type: string; status: string; unchanged: boolean }>(
+      `select type, status, ($3::text is null or updated_at = $3::timestamptz) as unchanged
+       from transactions where company_id = $1 and id = $2 for update`,
+      [companyId, input.id, input.ifUpdatedAt ?? null],
+      db,
+    );
+    if (!row || row.type !== input.type) throw new UserError("This transaction no longer exists.");
+    if (row.status === "voided") throw new UserError("A voided transaction can't be edited.");
+    if (!row.unchanged) throw new UserError("Someone else changed this transaction while you were editing. Reload to see their changes.");
+  }
+
+  // Contact
+  if (input.contactId) {
+    const c = await one<{ kind: string }>("select kind from contacts where company_id = $1 and id = $2", [companyId, input.contactId], db);
+    if (!c) throw new UserError("That name no longer exists.");
+    if (CUSTOMER_TYPES.includes(input.type) && c.kind !== "customer") throw new UserError("Choose a customer.");
+    if (VENDOR_TYPES.includes(input.type) && c.kind !== "vendor") throw new UserError("Choose a vendor.");
+  } else if (CUSTOMER_TYPES.includes(input.type)) throw new UserError("Choose a customer.");
+  else if (VENDOR_TYPES.includes(input.type)) throw new UserError("Choose a vendor.");
+
+  // Money-side account
+  let moneyAccount = input.accountId ?? null;
+  if (input.type === "payment" && !moneyAccount) moneyAccount = sys.undepositedFunds;
+  if (input.type === "sales_receipt" && !moneyAccount) moneyAccount = sys.undepositedFunds;
+  const allowed = MONEY_SIDE[input.type];
+  if (allowed) {
+    if (!moneyAccount) throw new UserError(MONEY_SIDE_MSG[input.type] ?? "Choose an account.");
+    const a = await one<{ type: string; system_role: string | null }>("select type, system_role from accounts where company_id = $1 and id = $2", [companyId, moneyAccount], db);
+    if (!a || !allowed.includes(a.type)) throw new UserError(MONEY_SIDE_MSG[input.type] ?? "Choose a different account.");
+    if (input.type === "deposit" && a.system_role === "undeposited_funds") throw new UserError("Deposit to a bank account, not Undeposited Funds.");
+  }
+  if (input.type === "transfer") {
+    const a = await one<{ type: string }>("select type from accounts where company_id = $1 and id = $2", [companyId, input.fromAccountId ?? null], db);
+    if (!a || !MONEY_SIDE.transfer!.includes(a.type)) throw new UserError("Choose the account to transfer from.");
+  }
+
+  // Lines: resolve items to accounts, check math, check accounts exist
+  const lines: (ResolvedLine & { isSource?: boolean })[] = await resolveLines(db, companyId, input);
+
+  // Deposits: grouped Undeposited Funds payments become lines
+  let depositSources: { id: string; amount: number }[] = [];
+  if (input.type === "deposit" && input.depositSourceIds.length) {
+    const ids = [...new Set(input.depositSourceIds)];
+    const rows = await query<{ id: string; total_cents: number; account_id: string; status: string; deposited_in: string | null; contact_id: string | null }>(
+      `select t.id, t.total_cents, t.account_id, t.status, d.deposit_txn_id as deposited_in, t.contact_id
+       from transactions t left join deposit_items d on d.source_txn_id = t.id
+       where t.company_id = $1 and t.id = any($2::uuid[]) and t.type in ('payment','sales_receipt') for update of t`,
+      [companyId, ids],
+      db,
+    );
+    if (rows.length !== ids.length) throw new UserError("A payment in this deposit no longer exists.");
+    for (const r of rows) {
+      if (r.status !== "posted") throw new UserError("A voided payment can't be deposited.");
+      if (r.account_id !== sys.undepositedFunds) throw new UserError("Only payments held in Undeposited Funds can be grouped into a deposit.");
+      if (r.deposited_in && r.deposited_in !== input.id) throw new UserError("A payment you picked is already in another deposit.");
     }
-    if (!accountId) throw new UserError(`Line ${idx + 1}: choose a product or service.`);
-    const amount = l.qty != null && l.rateCents != null ? lineAmount(l.qty, l.rateCents) : l.amountCents;
-    if (amount !== l.amountCents) throw new UserError(`Line ${idx + 1}: amount doesn't match quantity × rate.`);
-    return { accountId, amountCents: amount, taxable: l.taxable, lineId: String(idx), description: l.description ?? null, itemId: l.itemId ?? null, qty: l.qty ?? null, rateCents: l.rateCents ?? null };
-  });
-
-  // Sales accounts must be income-type
-  const acctIds = [...new Set(lines.map((l) => l.accountId))];
-  const accts = await query<{ id: string; type: string }>("select id, type from accounts where company_id = $1 and id = any($2::uuid[])", [companyId, acctIds], db);
-  if (accts.length !== acctIds.length) throw new UserError("One of the accounts no longer exists.");
+    depositSources = rows.map((r) => ({ id: r.id, amount: r.total_cents }));
+    lines.unshift(
+      ...rows.map((r) => ({
+        accountId: sys.undepositedFunds,
+        amountCents: r.total_cents,
+        contactId: r.contact_id,
+        itemId: null,
+        qty: null,
+        rateCents: null,
+        description: null,
+        taxable: false,
+        side: null,
+        kind: "account" as const,
+        isSource: true,
+      })),
+    );
+  }
 
   let taxRateBp: number | null = null;
   if (input.taxRateId) {
@@ -244,84 +278,37 @@ async function saveInvoice(
     taxRateBp = r.rate_bp;
   }
 
-  const { entries, totals } = post(
-    { type: "invoice", date: input.txnDate, contactId: input.contactId, lines, discountCents: input.discountCents, taxRateBp },
-    sys,
-  );
+  const postingInput: PostingInput = {
+    type: input.type,
+    date: input.txnDate,
+    contactId: input.contactId ?? null,
+    accountId: moneyAccount,
+    fromAccountId: input.fromAccountId ?? null,
+    amountCents: input.amountCents ?? undefined,
+    lines: lines.map((l, i) => ({
+      accountId: l.accountId,
+      amountCents: l.amountCents,
+      taxable: l.taxable,
+      side: l.side ?? undefined,
+      contactId: l.contactId,
+      description: l.description,
+      lineId: String(i),
+    })),
+    discountCents: input.discountCents,
+    taxRateBp,
+  };
+  const { entries, totals } = post(postingInput, sys);
 
-  const applied = input.id
-    ? (await one<{ s: number }>("select coalesce(sum(amount_cents), 0)::bigint as s from payment_applications where target_txn_id = $1", [input.id], db))!.s
-    : 0;
-  if (totals.totalCents < applied) {
-    throw new UserError(`Payments of ${(applied / 100).toFixed(2)} are already applied. The total can't go below that.`);
-  }
-
-  const number = input.number || (input.id ? null : await nextNumber(db, companyId, "invoice"));
-  const values = [
-    companyId, input.contactId, input.txnDate, input.dueDate ?? null, input.termsId ?? null, sys.accountsReceivable,
-    input.memo ?? null, input.privateNote ?? null, totals.subtotalCents, totals.discountCents, input.taxRateId ?? null,
-    totals.taxCents, totals.totalCents, input.emailTo, userId,
-  ];
-  let id: string;
-  if (input.id) {
-    id = input.id;
-    await query(
-      `update transactions set contact_id = $2, txn_date = $3, due_date = $4, terms_id = $5, account_id = $6, memo = $7, private_note = $8,
-         subtotal_cents = $9, discount_cents = $10, tax_rate_id = $11, tax_cents = $12, total_cents = $13, balance_cents = 0, email_to = $14,
-         updated_by = $15, number = coalesce($17, number)
-       where id = $16`,
-      [...values, id, number],
-      db,
-    );
-    await query("delete from transaction_lines where transaction_id = $1", [id], db);
-  } else {
-    const row = await one<{ id: string }>(
-      `insert into transactions (company_id, type, contact_id, txn_date, due_date, terms_id, account_id, memo, private_note,
-         subtotal_cents, discount_cents, tax_rate_id, tax_cents, total_cents, balance_cents, email_to, created_by, updated_by, number)
-       values ($1, 'invoice', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, $15, $15, $16) returning id`,
-      [...values, number],
-      db,
-    );
-    id = row!.id;
-  }
-
-  const lineIds: string[] = [];
-  for (const [pos, l] of lines.entries()) {
-    const row = await one<{ id: string }>(
-      `insert into transaction_lines (company_id, transaction_id, position, kind, item_id, account_id, description, qty, rate_cents, amount_cents, taxable)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id`,
-      [companyId, id, pos, l.itemId ? "item" : "account", l.itemId, l.accountId, l.description, l.qty, l.rateCents, l.amountCents, l.taxable],
-      db,
-    );
-    lineIds.push(row!.id);
-  }
-  await writeEntries(db, companyId, id, input.txnDate, entries, lineIds);
-  await refreshBalances(db, [id]);
-  const saved = await one<{ number: string | null }>("select number from transactions where id = $1", [id], db);
-  return { id, number: saved!.number };
-}
-
-async function savePayment(
-  db: PoolClient,
-  companyId: string,
-  userId: string,
-  input: z.infer<typeof paymentInput>,
-  sys: SystemAccounts,
-) {
-  const depositTo = input.depositToId ?? sys.undepositedFunds;
-  const dep = await one<{ type: string }>("select type from accounts where company_id = $1 and id = $2", [companyId, depositTo], db);
-  if (!dep || !["bank", "other_current_asset"].includes(dep.type)) throw new UserError("Deposit to a bank account or Undeposited Funds.");
-
-  // Previously applied invoices (on edit) need their balances restored too.
+  // Applications (payments to invoices, bill payments to bills)
   const previousTargets = input.id
     ? (await query<{ target_txn_id: string }>("select target_txn_id from payment_applications where source_txn_id = $1", [input.id], db)).map((r) => r.target_txn_id)
     : [];
-  if (input.id) await query("delete from payment_applications where source_txn_id = $1", [input.id], db);
-
-  // Lock target invoices in a stable order, then check each application fits.
   const targetIds = [...new Set(input.applications.map((a) => a.txnId))].sort();
-  if (targetIds.length !== input.applications.length) throw new UserError("An invoice is listed twice.");
-  if (targetIds.length) {
+  if (input.applications.length) {
+    if (input.type !== "payment" && input.type !== "bill_payment") throw new UserError("Only payments can be applied to invoices or bills.");
+    if (targetIds.length !== input.applications.length) throw new UserError("A document is listed twice.");
+    const targetType = input.type === "payment" ? "invoice" : "bill";
+    if (input.id) await query("delete from payment_applications where source_txn_id = $1", [input.id], db);
     await refreshBalances(db, targetIds);
     const targets = await query<{ id: string; type: string; contact_id: string; balance_cents: number; status: string; number: string | null }>(
       "select id, type, contact_id, balance_cents, status, number from transactions where company_id = $1 and id = any($2::uuid[]) order by id for update",
@@ -329,45 +316,219 @@ async function savePayment(
       db,
     );
     const byId = new Map(targets.map((t) => [t.id, t]));
+    const label = targetType === "invoice" ? "Invoice" : "Bill";
     for (const a of input.applications) {
       const t = byId.get(a.txnId);
-      if (!t || t.type !== "invoice" || t.status !== "posted") throw new UserError("An invoice you applied this to no longer exists.");
-      if (t.contact_id !== input.contactId) throw new UserError(`Invoice ${t.number} belongs to a different customer.`);
-      if (a.amountCents > t.balance_cents) throw new UserError(`Invoice ${t.number} only has ${(t.balance_cents / 100).toFixed(2)} open.`);
+      if (!t || t.type !== targetType || t.status !== "posted") throw new UserError(`A ${targetType} you applied this to no longer exists.`);
+      if (t.contact_id !== input.contactId) throw new UserError(`${label} ${t.number ?? ""} belongs to someone else.`);
+      if (a.amountCents > t.balance_cents) throw new UserError(`${label} ${t.number ?? ""} only has ${(t.balance_cents / 100).toFixed(2)} open.`);
     }
+    const applied = input.applications.reduce((s, a) => s + a.amountCents, 0);
+    if (applied > totals.totalCents) throw new UserError("You applied more than the payment amount.");
+  } else if (input.id) {
+    await query("delete from payment_applications where source_txn_id = $1", [input.id], db);
   }
-  const appliedTotal = input.applications.reduce((s, a) => s + a.amountCents, 0);
-  if (appliedTotal > input.amountCents) throw new UserError("You applied more than the amount received.");
 
-  const { entries } = post({ type: "payment", date: input.txnDate, contactId: input.contactId, accountId: depositTo, amountCents: input.amountCents, lines: [] }, sys);
+  // A document can't drop below what's already been paid on it
+  if (input.id && (input.type === "invoice" || input.type === "bill")) {
+    const paid = (await one<{ s: number }>("select coalesce(sum(amount_cents), 0)::bigint as s from payment_applications where target_txn_id = $1", [input.id], db))!.s;
+    if (totals.totalCents < paid) throw new UserError(`Payments of ${(paid / 100).toFixed(2)} are already applied. The total can't go below that.`);
+  }
 
+  // Header
+  const number = input.number || (input.id || !NUMBERED.includes(input.type) ? null : await nextNumber(db, companyId, input.type));
+  const header = [
+    input.contactId ?? null, input.txnDate, input.dueDate ?? null, input.termsId ?? null,
+    input.type === "invoice" || input.type === "credit_memo" ? sys.accountsReceivable : input.type === "bill" || input.type === "vendor_credit" ? sys.accountsPayable : moneyAccount,
+    input.paymentMethod ?? null, input.memo ?? null, input.privateNote ?? null,
+    totals.subtotalCents, totals.discountCents, input.taxRateId ?? null, totals.taxCents, totals.totalCents, input.emailTo, userId,
+  ];
   let id: string;
-  const unapplied = input.amountCents - appliedTotal; // stays as a customer credit
   if (input.id) {
     id = input.id;
     await query(
-      `update transactions set contact_id = $2, txn_date = $3, account_id = $4, payment_method = $5, number = $6, memo = $7,
-         subtotal_cents = $8, total_cents = $8, balance_cents = $9, updated_by = $10 where id = $1`,
-      [id, input.contactId, input.txnDate, depositTo, input.paymentMethod ?? null, input.number ?? null, input.memo ?? null, input.amountCents, unapplied, userId],
+      `update transactions set contact_id = $1, txn_date = $2, due_date = $3, terms_id = $4, account_id = $5, payment_method = $6, memo = $7,
+         private_note = $8, subtotal_cents = $9, discount_cents = $10, tax_rate_id = $11, tax_cents = $12, total_cents = $13, balance_cents = 0,
+         email_to = $14, updated_by = $15, number = coalesce($17, number)
+       where id = $16`,
+      [...header, id, number],
       db,
     );
+    await query("delete from deposit_items where deposit_txn_id = $1", [id], db);
+    await query("delete from ledger_entries where transaction_id = $1", [id], db);
+    await query("delete from transaction_lines where transaction_id = $1", [id], db);
   } else {
     const row = await one<{ id: string }>(
-      `insert into transactions (company_id, type, contact_id, txn_date, account_id, payment_method, number, memo, subtotal_cents, total_cents, balance_cents, created_by, updated_by)
-       values ($1, 'payment', $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $10) returning id`,
-      [companyId, input.contactId, input.txnDate, depositTo, input.paymentMethod ?? null, input.number ?? null, input.memo ?? null, input.amountCents, unapplied, userId],
+      `insert into transactions (company_id, type, contact_id, txn_date, due_date, terms_id, account_id, payment_method, memo, private_note,
+         subtotal_cents, discount_cents, tax_rate_id, tax_cents, total_cents, balance_cents, email_to, created_by, updated_by, number, source)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 0, $16, $17, $17, $18, $19) returning id`,
+      [companyId, input.type, ...header, number, input.source],
       db,
     );
     id = row!.id;
   }
+
+  // Lines (deposit source lines are represented by deposit_items, not lines)
+  const lineIds: (string | null)[] = [];
+  let pos = 0;
+  for (const l of lines) {
+    if (l.isSource) {
+      lineIds.push(null);
+      continue;
+    }
+    const row = await one<{ id: string }>(
+      `insert into transaction_lines (company_id, transaction_id, position, kind, item_id, account_id, description, qty, rate_cents, amount_cents, taxable, contact_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) returning id`,
+      [companyId, id, pos++, l.kind, l.itemId, l.accountId, l.description, l.qty, l.rateCents, l.amountCents, l.taxable, l.contactId],
+      db,
+    );
+    lineIds.push(row!.id);
+  }
+  for (const s of depositSources) await query("insert into deposit_items (deposit_txn_id, source_txn_id) values ($1, $2)", [id, s.id], db);
   for (const a of input.applications) {
+    await query("insert into payment_applications (company_id, source_txn_id, target_txn_id, amount_cents) values ($1, $2, $3, $4)", [companyId, id, a.txnId, a.amountCents], db);
+  }
+
+  // Ledger
+  for (const e of entries) {
+    const lineId = e.lineId != null ? lineIds[Number(e.lineId)] ?? null : null;
     await query(
-      "insert into payment_applications (company_id, source_txn_id, target_txn_id, amount_cents) values ($1, $2, $3, $4)",
-      [companyId, id, a.txnId, a.amountCents],
+      `insert into ledger_entries (company_id, transaction_id, line_id, account_id, entry_date, debit_cents, credit_cents, contact_id, memo)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [companyId, id, lineId, e.accountId, input.txnDate, e.debitCents, e.creditCents, e.contactId, e.memo],
       db,
     );
   }
-  await writeEntries(db, companyId, id, input.txnDate, entries, []);
-  await refreshBalances(db, [...new Set([...targetIds, ...previousTargets])]);
-  return { id, number: input.number ?? null };
+
+  await refreshBalances(db, [...new Set([id, ...targetIds, ...previousTargets])]);
+  await audit(db, companyId, userId, id, before ? "update" : "create", before, await snapshot(db, id));
+  const saved = await one<{ number: string | null }>("select number from transactions where id = $1", [id], db);
+  return { id, number: saved!.number };
+}
+
+type ResolvedLine = {
+  kind: "item" | "account" | "debit" | "credit";
+  itemId: string | null;
+  accountId: string;
+  description: string | null;
+  qty: number | null;
+  rateCents: number | null;
+  amountCents: number;
+  taxable: boolean;
+  side: "debit" | "credit" | null;
+  contactId: string | null;
+};
+
+async function resolveLines(db: PoolClient, companyId: string, input: Input): Promise<ResolvedLine[]> {
+  const itemIds = input.lines.map((l) => l.itemId).filter((x): x is string => !!x);
+  const items = itemIds.length
+    ? await query<{ id: string; name: string; income_account_id: string | null; expense_account_id: string | null }>(
+        "select id, name, income_account_id, expense_account_id from items where company_id = $1 and id = any($2::uuid[])",
+        [companyId, itemIds],
+        db,
+      )
+    : [];
+  const itemMap = new Map(items.map((i) => [i.id, i]));
+  const isSales = SALES_FORMS.includes(input.type);
+  const isPurchase = PURCHASE_FORMS.includes(input.type);
+
+  const out: ResolvedLine[] = input.lines.map((l, idx) => {
+    const n = idx + 1;
+    let accountId = l.accountId ?? null;
+    if (l.itemId) {
+      if (!isSales && !isPurchase) throw new UserError(`Line ${n}: products and services can't go on this form.`);
+      const item = itemMap.get(l.itemId);
+      if (!item) throw new UserError(`Line ${n}: that product or service no longer exists.`);
+      accountId = isSales ? item.income_account_id : item.expense_account_id ?? item.income_account_id;
+      if (!accountId) throw new UserError(`Line ${n}: ${item.name} has no ${isSales ? "income" : "expense"} account.`);
+    }
+    if (!accountId) throw new UserError(isSales ? `Line ${n}: choose a product or service.` : `Line ${n}: choose a category.`);
+    let amount = l.amountCents;
+    if (l.qty != null && l.rateCents != null) {
+      amount = lineAmount(l.qty, l.rateCents);
+      if (amount !== l.amountCents) throw new UserError(`Line ${n}: the amount doesn't match quantity × rate.`);
+    }
+    if (input.type === "journal_entry" && !l.side) throw new UserError(`Line ${n}: enter a debit or a credit.`);
+    return {
+      kind: input.type === "journal_entry" ? (l.side as "debit" | "credit") : l.itemId ? "item" : "account",
+      itemId: l.itemId ?? null,
+      accountId,
+      description: l.description ?? null,
+      qty: l.qty ?? null,
+      rateCents: l.rateCents ?? null,
+      amountCents: amount,
+      taxable: l.taxable,
+      side: l.side ?? null,
+      contactId: l.contactId ?? null,
+    };
+  });
+
+  const acctIds = [...new Set(out.map((l) => l.accountId))];
+  if (acctIds.length) {
+    const accts = await query<{ id: string; type: string; system_role: string | null }>(
+      "select id, type, system_role from accounts where company_id = $1 and id = any($2::uuid[])",
+      [companyId, acctIds],
+      db,
+    );
+    if (accts.length !== acctIds.length) throw new UserError("One of the accounts no longer exists.");
+    const byId = new Map(accts.map((a) => [a.id, a]));
+    for (const [i, l] of out.entries()) {
+      const a = byId.get(l.accountId)!;
+      // A/R and A/P need a name on every entry for aging to work
+      if (input.type === "journal_entry" && (a.type === "accounts_receivable" || a.type === "accounts_payable") && !l.contactId) {
+        throw new UserError(`Line ${i + 1}: choose a customer or vendor for ${a.type === "accounts_receivable" ? "Accounts Receivable" : "Accounts Payable"}.`);
+      }
+      if (input.type !== "journal_entry" && (a.type === "accounts_receivable" || a.type === "accounts_payable")) {
+        throw new UserError(`Line ${i + 1}: use an invoice, bill or payment for ${a.type === "accounts_receivable" ? "Accounts Receivable" : "Accounts Payable"}.`);
+      }
+    }
+  }
+  return out;
+}
+
+/** Void: keep the record and its number, post nothing, unlink payments it made. */
+export async function voidTransaction(companyId: string, userId: string, id: string, opts: TxOptions = {}) {
+  try {
+    await tx(async (db) => {
+      const before = await snapshot(db, id);
+      const t = await one<{ type: string; status: string }>("select type, status from transactions where company_id = $1 and id = $2 for update", [companyId, id], db);
+      if (!t) throw new UserError("This transaction no longer exists.");
+      if (t.status === "voided") throw new UserError("This is already voided.");
+      const paidOn = await one("select 1 from payment_applications where target_txn_id = $1", [id], db);
+      if (paidOn) throw new UserError("Payments are applied to this. Delete or void those payments first.");
+      const inDeposit = await one("select 1 from deposit_items where source_txn_id = $1", [id], db);
+      if (inDeposit) throw new UserError("This payment is part of a bank deposit. Remove it from the deposit first.");
+      const targets = (await query<{ target_txn_id: string }>("select target_txn_id from payment_applications where source_txn_id = $1", [id], db)).map((r) => r.target_txn_id);
+      await query("delete from payment_applications where source_txn_id = $1", [id], db);
+      await query("delete from deposit_items where deposit_txn_id = $1", [id], db);
+      await query("delete from ledger_entries where transaction_id = $1", [id], db);
+      await query(
+        "update transactions set status = 'voided', voided_at = now(), balance_cents = 0, updated_by = $2, private_note = concat_ws(E'\\n', private_note, 'Voided') where id = $1",
+        [id, userId],
+        db,
+      );
+      await refreshBalances(db, targets);
+      await audit(db, companyId, userId, id, "void", before, await snapshot(db, id));
+    }, opts);
+  } catch (e) {
+    throw translateDbError(e);
+  }
+}
+
+/** Delete: remove the transaction entirely. */
+export async function deleteTransaction(companyId: string, userId: string, id: string, opts: TxOptions = {}) {
+  try {
+    await tx(async (db) => {
+      const before = await snapshot(db, id);
+      if (!before) throw new UserError("This transaction no longer exists.");
+      const targets = (await query<{ target_txn_id: string }>("select target_txn_id from payment_applications where source_txn_id = $1", [id], db)).map((r) => r.target_txn_id);
+      await query("update bank_feed_txns set status = 'for_review', created_txn_id = null, reviewed_at = null where created_txn_id = $1", [id], db);
+      await query("update bank_feed_txns set status = 'for_review', matched_txn_id = null, reviewed_at = null where matched_txn_id = $1", [id], db);
+      await query("delete from transactions where company_id = $1 and id = $2", [companyId, id], db);
+      await refreshBalances(db, targets);
+      await audit(db, companyId, userId, id, "delete", before, null);
+    }, opts);
+  } catch (e) {
+    throw translateDbError(e);
+  }
 }
