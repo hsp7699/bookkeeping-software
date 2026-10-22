@@ -19,7 +19,14 @@ export type TxnType =
   | "deposit"
   | "transfer"
   | "journal_entry"
-  | "opening_balance";
+  | "opening_balance"
+  | "sales_tax_payment"
+  // documents that never post:
+  | "estimate"
+  | "purchase_order";
+
+/** Types that are documents only: they have totals but no ledger entries. */
+export const NON_POSTING: ReadonlySet<TxnType> = new Set(["estimate", "purchase_order"]);
 
 export interface SystemAccounts {
   accountsReceivable: string;
@@ -40,6 +47,7 @@ export interface PostingLine {
   contactId?: string | null;
   lineId?: string;
   description?: string | null;
+  classId?: string | null;
 }
 
 export interface PostingInput {
@@ -69,6 +77,7 @@ export interface LedgerEntry {
   contactId: string | null;
   lineId: string | null;
   memo: string | null;
+  classId: string | null;
 }
 
 export interface Totals {
@@ -119,6 +128,7 @@ class Builder {
       contactId: opts.contactId ?? null,
       lineId: opts.lineId ?? null,
       memo: opts.memo ?? null,
+      classId: opts.classId ?? null,
     });
   }
   lines(side: "debit" | "credit", lines: PostingLine[], contactId: string | null = null) {
@@ -127,6 +137,7 @@ class Builder {
         lineId: l.lineId ?? null,
         memo: l.description ?? null,
         contactId: l.contactId ?? contactId,
+        classId: l.classId ?? null,
       });
     }
   }
@@ -271,7 +282,7 @@ export function post(input: PostingInput, sys: SystemAccounts): { entries: Ledge
         if (l.amountCents < 0) throw new PostingError("Enter journal entry amounts as positive numbers.");
         if (side === "debit") debits += l.amountCents;
         else credits += l.amountCents;
-        b.post(side, l.accountId, l.amountCents, { lineId: l.lineId ?? null, memo: l.description ?? null, contactId: l.contactId ?? null });
+        b.post(side, l.accountId, l.amountCents, { lineId: l.lineId ?? null, memo: l.description ?? null, contactId: l.contactId ?? null, classId: l.classId ?? null });
       }
       if (debits !== credits) {
         throw new PostingError(`Debits and credits must be equal. They're off by ${Math.abs(debits - credits) / 100}.`);
@@ -289,6 +300,33 @@ export function post(input: PostingInput, sys: SystemAccounts): { entries: Ledge
       b.post("credit", sys.openingBalanceEquity, amount);
       totals = plainTotals(Math.abs(amount));
       break;
+    }
+
+    case "sales_tax_payment": {
+      // paying the tax agency: clears Sales Tax Payable from the bank
+      const from = need(input.accountId, "Choose the account the tax was paid from.");
+      const amount = need(input.amountCents, "Enter the amount paid.");
+      if (amount <= 0) throw new PostingError("The payment must be more than zero.");
+      b.post("debit", sys.salesTaxPayable, amount);
+      b.post("credit", from, amount);
+      totals = plainTotals(amount);
+      break;
+    }
+
+    case "estimate": {
+      need(contact, "Choose a customer.");
+      if (input.lines.length === 0) throw new PostingError("Add at least one line.");
+      totals = salesTotals();
+      if (totals.totalCents < 0) throw new PostingError("The total can't be negative.");
+      return { entries: [], totals };
+    }
+
+    case "purchase_order": {
+      need(contact, "Choose a vendor.");
+      if (input.lines.length === 0) throw new PostingError("Add at least one line.");
+      const total = sum(input.lines);
+      if (total < 0) throw new PostingError("The total can't be negative.");
+      return { entries: [], totals: plainTotals(total) };
     }
 
     default: {

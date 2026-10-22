@@ -24,6 +24,11 @@ const line = z.object({
   taxable: z.boolean().default(false),
   side: z.enum(["debit", "credit"]).nullish(),
   contactId: uuid.nullish(),
+  classId: uuid.nullish(),
+  /** expense lines: bill this cost to the customer in contactId */
+  billable: z.boolean().default(false),
+  /** invoice lines: the billable expense line this line bills */
+  billsLineId: uuid.nullish(),
 });
 
 export const txnInput = z.object({
@@ -31,6 +36,7 @@ export const txnInput = z.object({
     "invoice", "sales_receipt", "payment", "credit_memo", "refund_receipt",
     "expense", "check", "bill", "bill_payment", "vendor_credit", "credit_card_credit",
     "deposit", "transfer", "journal_entry", "opening_balance",
+    "estimate", "purchase_order", "sales_tax_payment",
   ]),
   id: uuid.optional(),
   ifUpdatedAt: z.string().optional(),
@@ -57,15 +63,23 @@ export const txnInput = z.object({
   /** deposit: payments and sales receipts sitting in Undeposited Funds */
   depositSourceIds: z.array(uuid).default([]),
   source: z.enum(["manual", "bank_feed", "import", "recurring", "system"]).default("manual"),
+  locationId: uuid.nullish(),
+  tagIds: z.array(uuid).default([]),
+  /** estimates: pending | accepted | rejected | closed; purchase orders: open | closed */
+  docStatus: z.enum(["pending", "accepted", "rejected", "closed", "open"]).nullish(),
+  expiresOn: dateStr.nullish(),
+  /** invoice made from an estimate, or bill made from a purchase order */
+  linkedFromId: uuid.nullish(),
+  recurringTemplateId: uuid.nullish(),
 });
 export type TxnInput = z.input<typeof txnInput>;
 type Input = z.infer<typeof txnInput>;
 
-const CUSTOMER_TYPES: TxnType[] = ["invoice", "sales_receipt", "payment", "credit_memo", "refund_receipt"];
-const VENDOR_TYPES: TxnType[] = ["bill", "bill_payment", "vendor_credit"];
-const SALES_FORMS: TxnType[] = ["invoice", "sales_receipt", "credit_memo", "refund_receipt"];
-const PURCHASE_FORMS: TxnType[] = ["expense", "check", "bill", "vendor_credit", "credit_card_credit"];
-const NUMBERED: TxnType[] = ["invoice", "sales_receipt", "credit_memo", "refund_receipt", "journal_entry"];
+const CUSTOMER_TYPES: TxnType[] = ["invoice", "sales_receipt", "payment", "credit_memo", "refund_receipt", "estimate"];
+const VENDOR_TYPES: TxnType[] = ["bill", "bill_payment", "vendor_credit", "purchase_order"];
+const SALES_FORMS: TxnType[] = ["invoice", "sales_receipt", "credit_memo", "refund_receipt", "estimate"];
+const PURCHASE_FORMS: TxnType[] = ["expense", "check", "bill", "vendor_credit", "credit_card_credit", "purchase_order"];
+const NUMBERED: TxnType[] = ["invoice", "sales_receipt", "credit_memo", "refund_receipt", "journal_entry", "estimate", "purchase_order"];
 
 /** Which account types may sit on the money side of each form. */
 const MONEY_SIDE: Partial<Record<TxnType, string[]>> = {
@@ -76,6 +90,7 @@ const MONEY_SIDE: Partial<Record<TxnType, string[]>> = {
   check: ["bank"],
   credit_card_credit: ["credit_card"],
   bill_payment: ["bank", "credit_card"],
+  sales_tax_payment: ["bank", "credit_card"],
   deposit: ["bank", "other_current_asset"],
   transfer: ["bank", "credit_card", "other_current_asset", "other_current_liability", "long_term_liability", "equity"],
   opening_balance: ["bank", "credit_card", "accounts_receivable", "other_current_asset", "fixed_asset", "other_asset", "accounts_payable", "other_current_liability", "long_term_liability", "equity"],
@@ -89,6 +104,7 @@ const MONEY_SIDE_MSG: Partial<Record<TxnType, string>> = {
   check: "Choose a bank account.",
   credit_card_credit: "Choose a credit card account.",
   bill_payment: "Pay from a bank or credit card account.",
+  sales_tax_payment: "Choose the bank or card the tax was paid from.",
   deposit: "Deposit to a bank account.",
   transfer: "Choose balance sheet accounts for a transfer.",
   opening_balance: "Opening balances go on balance sheet accounts.",
@@ -267,6 +283,9 @@ export async function saveInDb(db: PoolClient, companyId: string, userId: string
         taxable: false,
         side: null,
         kind: "account" as const,
+        classId: null,
+        billable: false,
+        billsLineId: null,
         isSource: true,
       })),
     );
@@ -294,6 +313,7 @@ export async function saveInDb(db: PoolClient, companyId: string, userId: string
       contactId: l.contactId,
       description: l.description,
       lineId: String(i),
+      classId: l.classId,
     })),
     discountCents: input.discountCents,
     taxRateBp,
@@ -336,6 +356,15 @@ export async function saveInDb(db: PoolClient, companyId: string, userId: string
     if (totals.totalCents < paid) throw new UserError(`Payments of ${(paid / 100).toFixed(2)} are already applied. The total can't go below that.`);
   }
 
+  // An invoice made from an estimate (or a bill from a purchase order) must be for the same name
+  if (input.linkedFromId) {
+    const src = await one<{ type: string; contact_id: string | null }>("select type, contact_id from transactions where company_id = $1 and id = $2", [companyId, input.linkedFromId], db);
+    const want = input.type === "invoice" ? "estimate" : input.type === "bill" ? "purchase_order" : null;
+    if (!src || src.type !== want) throw new UserError("The estimate or purchase order this came from no longer exists.");
+    if (src.contact_id !== input.contactId) throw new UserError("This must be for the same name as the document it came from.");
+  }
+  const previousLinked = input.id ? (await one<{ l: string | null }>("select linked_from_id as l from transactions where id = $1", [input.id], db))?.l ?? null : null;
+
   // Header
   const number = input.number || (input.id || !NUMBERED.includes(input.type) ? null : await nextNumber(db, companyId, input.type));
   const header = [
@@ -344,15 +373,24 @@ export async function saveInDb(db: PoolClient, companyId: string, userId: string
     input.paymentMethod ?? null, input.memo ?? null, input.privateNote ?? null,
     totals.subtotalCents, totals.discountCents, input.taxRateId ?? null, totals.taxCents, totals.totalCents, input.emailTo, userId,
   ];
+  let billedLinks: { position: number; billed_line_id: string; contact_id: string | null }[] = [];
+  const docStatus = input.docStatus ?? (input.id ? null : input.type === "estimate" ? "pending" : input.type === "purchase_order" ? "open" : null);
   let id: string;
   if (input.id) {
     id = input.id;
     await query(
       `update transactions set contact_id = $1, txn_date = $2, due_date = $3, terms_id = $4, account_id = $5, payment_method = $6, memo = $7,
          private_note = $8, subtotal_cents = $9, discount_cents = $10, tax_rate_id = $11, tax_cents = $12, total_cents = $13, balance_cents = 0,
-         email_to = $14, updated_by = $15, number = coalesce($17, number)
+         email_to = $14, updated_by = $15, number = coalesce($17, number), location_id = $18, doc_status = coalesce($19, doc_status),
+         expires_on = $20, linked_from_id = $21
        where id = $16`,
-      [...header, id, number],
+      [...header, id, number, input.locationId ?? null, docStatus, input.expiresOn ?? null, input.linkedFromId ?? null],
+      db,
+    );
+    // keep "already billed" links on billable expense lines through an edit (matched by position)
+    billedLinks = await query<{ position: number; billed_line_id: string; contact_id: string | null }>(
+      "select position, billed_line_id, contact_id from transaction_lines where transaction_id = $1 and billed_line_id is not null",
+      [id],
       db,
     );
     await query("delete from deposit_items where deposit_txn_id = $1", [id], db);
@@ -361,9 +399,10 @@ export async function saveInDb(db: PoolClient, companyId: string, userId: string
   } else {
     const row = await one<{ id: string }>(
       `insert into transactions (company_id, type, contact_id, txn_date, due_date, terms_id, account_id, payment_method, memo, private_note,
-         subtotal_cents, discount_cents, tax_rate_id, tax_cents, total_cents, balance_cents, email_to, created_by, updated_by, number, source)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 0, $16, $17, $17, $18, $19) returning id`,
-      [companyId, input.type, ...header, number, input.source],
+         subtotal_cents, discount_cents, tax_rate_id, tax_cents, total_cents, balance_cents, email_to, created_by, updated_by, number, source,
+         location_id, doc_status, expires_on, linked_from_id, recurring_template_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 0, $16, $17, $17, $18, $19, $20, $21, $22, $23, $24) returning id`,
+      [companyId, input.type, ...header, number, input.source, input.locationId ?? null, docStatus, input.expiresOn ?? null, input.linkedFromId ?? null, input.recurringTemplateId ?? null],
       db,
     );
     id = row!.id;
@@ -378,12 +417,38 @@ export async function saveInDb(db: PoolClient, companyId: string, userId: string
       continue;
     }
     const row = await one<{ id: string }>(
-      `insert into transaction_lines (company_id, transaction_id, position, kind, item_id, account_id, description, qty, rate_cents, amount_cents, taxable, contact_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) returning id`,
-      [companyId, id, pos++, l.kind, l.itemId, l.accountId, l.description, l.qty, l.rateCents, l.amountCents, l.taxable, l.contactId],
+      `insert into transaction_lines (company_id, transaction_id, position, kind, item_id, account_id, description, qty, rate_cents, amount_cents, taxable, contact_id, class_id, billable)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning id`,
+      [companyId, id, pos++, l.kind, l.itemId, l.accountId, l.description, l.qty, l.rateCents, l.amountCents, l.taxable, l.contactId, l.classId, l.billable],
       db,
     );
     lineIds.push(row!.id);
+    if (l.billsLineId) {
+      // mark the billable expense line as billed by this invoice line
+      const billed = await one(
+        `update transaction_lines set billed_line_id = $1
+         where company_id = $2 and id = $3 and billable and contact_id = $4 and billed_line_id is null returning id`,
+        [row!.id, companyId, l.billsLineId, input.contactId],
+        db,
+      );
+      if (!billed) throw new UserError("A billable expense on this invoice was already billed, or belongs to another customer.");
+    }
+  }
+  for (const b of billedLinks) {
+    const kept = await one(
+      "update transaction_lines set billed_line_id = $3 where transaction_id = $1 and position = $2 and billable and contact_id is not distinct from $4 returning id",
+      [id, b.position, b.billed_line_id, b.contact_id],
+      db,
+    );
+    if (!kept) throw new UserError("A line on this was already billed to a customer. Keep it billable for the same customer, or remove it from that invoice first.");
+  }
+  await query("delete from transaction_tags where transaction_id = $1", [id], db);
+  if (input.tagIds.length) {
+    await query(
+      "insert into transaction_tags (transaction_id, tag_id) select $1, t.id from tags t where t.company_id = $2 and t.id = any($3::uuid[]) on conflict do nothing",
+      [id, companyId, input.tagIds],
+      db,
+    );
   }
   for (const s of depositSources) await query("insert into deposit_items (deposit_txn_id, source_txn_id) values ($1, $2)", [id, s.id], db);
   for (const a of input.applications) {
@@ -394,14 +459,15 @@ export async function saveInDb(db: PoolClient, companyId: string, userId: string
   for (const e of entries) {
     const lineId = e.lineId != null ? lineIds[Number(e.lineId)] ?? null : null;
     await query(
-      `insert into ledger_entries (company_id, transaction_id, line_id, account_id, entry_date, debit_cents, credit_cents, contact_id, memo)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [companyId, id, lineId, e.accountId, input.txnDate, e.debitCents, e.creditCents, e.contactId, e.memo],
+      `insert into ledger_entries (company_id, transaction_id, line_id, account_id, entry_date, debit_cents, credit_cents, contact_id, memo, class_id, location_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [companyId, id, lineId, e.accountId, input.txnDate, e.debitCents, e.creditCents, e.contactId, e.memo, e.classId, input.locationId ?? null],
       db,
     );
   }
 
   await refreshBalances(db, [...new Set([id, ...targetIds, ...previousTargets])]);
+  for (const src of new Set([input.linkedFromId, previousLinked].filter((x): x is string => !!x))) await refreshDocStatus(db, src);
   await audit(db, companyId, userId, id, before ? "update" : "create", before, await snapshot(db, id));
   const saved = await one<{ number: string | null }>("select number from transactions where id = $1", [id], db);
   return { id, number: saved!.number };
@@ -418,6 +484,9 @@ type ResolvedLine = {
   taxable: boolean;
   side: "debit" | "credit" | null;
   contactId: string | null;
+  classId: string | null;
+  billable: boolean;
+  billsLineId: string | null;
 };
 
 async function resolveLines(db: PoolClient, companyId: string, input: Input): Promise<ResolvedLine[]> {
@@ -461,6 +530,9 @@ async function resolveLines(db: PoolClient, companyId: string, input: Input): Pr
       taxable: l.taxable,
       side: l.side ?? null,
       contactId: l.contactId ?? null,
+      classId: l.classId ?? null,
+      billable: !!l.billable && !!l.contactId,
+      billsLineId: input.type === "invoice" ? l.billsLineId ?? null : null,
     };
   });
 
@@ -532,4 +604,23 @@ export async function deleteTransaction(companyId: string, userId: string, id: s
   } catch (e) {
     throw translateDbError(e);
   }
+}
+
+/**
+ * An estimate closes once invoices made from it cover its total; a purchase
+ * order closes once bills cover it. Rejected estimates stay rejected.
+ */
+export async function refreshDocStatus(db: PoolClient, docId: string) {
+  await query(
+    `update transactions d set doc_status = case
+        when d.doc_status = 'rejected' then 'rejected'
+        when coalesce((select sum(t.total_cents) from transactions t where t.linked_from_id = d.id and t.status = 'posted'), 0) >= d.total_cents and d.total_cents > 0 then 'closed'
+        when d.type = 'estimate' and exists (select 1 from transactions t where t.linked_from_id = d.id and t.status = 'posted') then 'accepted'
+        when d.type = 'estimate' and d.doc_status = 'closed' then 'accepted'
+        when d.type = 'purchase_order' then 'open'
+        else d.doc_status end
+     where d.id = $1 and d.type in ('estimate','purchase_order')`,
+    [docId],
+    db,
+  );
 }

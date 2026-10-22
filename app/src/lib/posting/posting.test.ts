@@ -177,3 +177,22 @@ describe("computeTotals", () => {
     expect(computeTotals([{ accountId: "S", amountCents: 1000, taxable: true }]).taxCents).toBe(0);
   });
 });
+
+describe("phase 2 types", () => {
+  it("sales tax payment clears the liability", () => {
+    expect(net(post({ ...base, contactId: null, type: "sales_tax_payment", accountId: "BANK", amountCents: 825, lines: [] }, sys).entries)).toEqual({ TAX: 825, BANK: -825 });
+  });
+  it("estimates and purchase orders never post", () => {
+    const e = post({ ...base, type: "estimate", taxRateBp: 1000, lines: [{ accountId: "S", amountCents: 1000, taxable: true }] }, sys);
+    expect(e.entries).toEqual([]);
+    expect(e.totals.totalCents).toBe(1100);
+    const po = post({ ...base, type: "purchase_order", lines: [{ accountId: "SUP", amountCents: 500 }] }, sys);
+    expect(po.entries).toEqual([]);
+    expect(po.totals.totalCents).toBe(500);
+  });
+  it("carries the class onto ledger entries", () => {
+    const { entries } = post({ ...base, type: "invoice", lines: [{ accountId: "S", amountCents: 1000, classId: "CL1" }] }, sys);
+    expect(entries.find((e) => e.accountId === "S")?.classId).toBe("CL1");
+    expect(entries.find((e) => e.accountId === "AR")?.classId).toBeNull();
+  });
+});
