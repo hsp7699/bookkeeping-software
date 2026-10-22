@@ -1,0 +1,115 @@
+feature,area,priority,original,clone,notes
+Sign up and sign in with email or Google,onboarding,must,yes,no,S01
+Company setup wizard seeds a chart of accounts by entity type,onboarding,must,yes,no,S02; our own default COA
+Fiscal year start and accounting method setting,settings,must,yes,no,S45
+Chart of accounts list with balances,accounting,must,yes,no,S06
+Create edit and inactivate accounts with type and detail type,accounting,must,yes,no,S07
+Sub-accounts,accounting,must,yes,no,S07 parent_id
+Opening balances,accounting,must,yes,no,posts to Opening Balance Equity
+Account register with running balance and inline edit,accounting,must,yes,no,S08
+Double-entry ledger with balanced postings for every transaction type,accounting,must,yes,no,core invariant; not visible in QBO but implied by every report
+Journal entry form that must balance,accounting,must,yes,no,S37
+Transfer between accounts,accounting,must,yes,no,S37
+Bank deposit grouping Undeposited Funds,accounting,must,yes,no,F12
+Void and delete transactions with re-posting,accounting,must,yes,no,
+Closing date with password override,accounting,must,yes,no,F11
+Audit log of every add edit delete,accounting,must,yes,no,S47
+Customers list with money bar and open balances,sales,must,yes,no,S09
+Customer detail with transaction history,sales,must,yes,no,S10
+Customer editor with terms and addresses,sales,must,yes,no,S11
+Products and services list (service and non-inventory),sales,must,yes,no,S12
+Invoice form with line items tax and discount,sales,must,yes,no,S14
+Email invoice as PDF,sales,must,yes,no,S15; via the user's own email provider
+Print or download invoice PDF,sales,must,yes,no,
+Payment terms and due dates,sales,must,yes,no,
+Receive payment applied to one or many invoices,sales,must,yes,no,S17
+Partial payments and overpayment credits,sales,must,yes,no,
+Sales receipt,sales,must,yes,no,S18
+Credit memo and refund receipt,sales,must,yes,no,S19
+Sales transactions list with status pills and filters,sales,must,yes,no,S20
+Vendors list with money bar,expenses,must,yes,no,S21
+Vendor editor,expenses,must,yes,no,S22
+Expense and check form with split category lines,expenses,must,yes,no,S23
+Bill form,expenses,must,yes,no,S24
+Pay bills (one or many),expenses,must,yes,no,S25; records payment only
+Vendor credit,expenses,must,yes,no,
+Expense transactions list,expenses,must,yes,no,S26
+Attachments on transactions,expenses,must,yes,no,
+Import bank transactions from CSV OFX QFX,banking,must,yes,no,S31
+Bank feed review with For review Categorized Excluded tabs,banking,must,yes,no,S28
+Categorize a feed transaction including splits,banking,must,yes,no,S29
+Match a feed transaction to an existing transaction with suggestions,banking,must,yes,no,S29
+Duplicate detection on import,banking,must,yes,no,
+Bank rules with conditions actions and priority,banking,must,yes,no,S32
+Reconcile an account to a statement,banking,must,yes,no,S34 S35
+Reconciliation history report and undo last,banking,must,yes,no,S36
+Profit and loss report,reports,must,yes,no,
+Balance sheet report,reports,must,yes,no,
+Cash and accrual basis toggle on reports,reports,must,yes,no,
+A/R aging summary and detail,reports,must,yes,no,
+A/P aging summary and detail,reports,must,yes,no,
+General ledger and transaction detail by account,reports,must,yes,no,
+Report date ranges and drill-down to transactions,reports,must,yes,no,S39
+Export reports to CSV and PDF,reports,must,yes,no,
+Home dashboard with cash invoices and P&L widgets,dashboard,must,yes,no,S03
+Quick Create (+) menu,navigation,must,yes,no,S04
+Global search by number amount or name,navigation,must,yes,no,S05
+Live bank connection through an aggregator (Plaid or similar),banking,should,yes,no,S30; user's own aggregator keys; not Intuit's bank network
+Credit card accounts and credit card payments in feed,banking,should,yes,no,
+Transfers detected across two connected accounts,banking,should,yes,no,
+Receipt upload with field extraction and match,banking,should,yes,no,S33
+Estimates with status and convert to invoice,sales,should,yes,no,S16
+Progress invoicing from an estimate,sales,should,yes,no,
+Recurring invoices bills and expenses,automation,should,yes,no,S44
+Customer statements,sales,should,yes,no,S50
+Invoice reminders for overdue invoices,sales,should,yes,no,
+Pay invoice online via the user's own Stripe account,sales,should,yes,no,S49; replaces QuickBooks Payments
+Public customer invoice page,sales,should,yes,no,S49
+Invoice template customization (logo colours fields),sales,should,yes,no,S48; our own templates
+Billable expenses flow onto the next invoice,sales,should,yes,no,F05
+Sub-customers,sales,should,yes,no,
+Sales tax rates agencies and liability report,tax,should,yes,no,S40; manual rates
+Record sales tax payment,tax,should,yes,no,
+Tax-exempt customers,tax,should,yes,no,
+1099 vendor tracking and 1099 report,tax,should,yes,no,report only; no e-filing
+Classes,tracking,should,yes,no,S43; Plus feature
+Locations,tracking,should,yes,no,S43; Plus feature
+Tags,tracking,should,yes,no,
+Report columns by month class or customer and compare periods,reports,should,yes,no,
+Saved report customizations,reports,should,yes,no,
+Sales by customer and sales by product reports,reports,should,yes,no,
+Expenses by vendor report,reports,should,yes,no,
+Cash flow statement,reports,should,yes,no,
+Trial balance,reports,should,yes,no,
+Budgets by account and month,planning,should,yes,no,S41; Plus feature
+Budget vs actuals report,planning,should,yes,no,
+Multiple users with roles (admin standard reports-only),users,should,yes,no,S46
+Invite an accountant user,users,should,yes,no,
+Purchase orders and convert to bill,expenses,should,yes,no,S27
+Inventory items with quantity on hand and FIFO cost,inventory,could,yes,no,S13; Plus feature
+Inventory adjustments and reorder points,inventory,could,yes,no,
+Bundles,inventory,could,yes,no,
+Projects with profitability,projects,could,yes,no,S42
+Time tracking added to invoices,projects,could,yes,no,
+Multi-currency with exchange rates and revaluation,accounting,could,yes,no,
+Custom roles and permissions,users,could,yes,no,Advanced feature
+Approval workflows for bills,automation,could,yes,no,Advanced feature
+Workflow reminders automation,automation,could,yes,no,Advanced feature
+Batch create invoices and expenses,automation,could,yes,no,Advanced feature
+Custom fields on transactions and contacts,settings,could,yes,no,
+Custom dashboards and KPIs,dashboard,could,yes,no,Advanced feature
+Management report package,reports,could,yes,no,
+Mobile-friendly receipt capture,banking,could,yes,no,responsive web; no native app in scope
+Merge duplicate customers vendors or accounts,accounting,could,yes,no,
+Reclassify transactions in bulk,accounting,could,yes,no,
+Import customers vendors and items from CSV,onboarding,could,yes,no,
+Payroll,payroll,could,yes,skip,regulated tax filings in every jurisdiction; post a payroll provider's journal entries instead
+QuickBooks Payments card and ACH processing,payments,could,yes,skip,regulated money movement; use your own Stripe account instead
+Bill Pay sending ACH and checks,payments,could,yes,skip,money movement service; record the payment and pay from your bank
+Intuit direct bank connections,banking,could,yes,skip,partner network; use an aggregator with your own keys
+Automated sales tax rate lookup and filing,tax,could,yes,skip,needs a licensed rate database (Avalara TaxJar Stripe Tax)
+Intuit Intelligence AI agents,ai,could,yes,skip,Intuit's product; build your own later if wanted
+App marketplace,integrations,could,yes,skip,their partner network
+ProAdvisor network and live bookkeeping,services,could,yes,skip,human services network
+1099 e-filing,tax,could,yes,skip,IRS e-file transmitter program
+Construction financials and Excel sync,industry,could,yes,skip,niche Advanced add-ons outside the scope
