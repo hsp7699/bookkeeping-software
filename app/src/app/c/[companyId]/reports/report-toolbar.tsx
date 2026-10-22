@@ -57,7 +57,7 @@ export function ReportToolbar({
       const col = next.columns ?? c;
       q.delete("columns");
       q.delete("compare");
-      if (col === "months") q.set("columns", "months");
+      if (col === "months" || col === "class" || col === "location") q.set("columns", col);
       else if (col === "prev_period" || col === "prev_year") q.set("compare", col);
     }
     router.push(`?${q.toString()}`);
@@ -110,6 +110,8 @@ export function ReportToolbar({
             <NativeSelect {...props} value={c} onChange={(e) => { setC(e.target.value); run({ columns: e.target.value }); }}>
               <option value="total">Total only</option>
               <option value="months">Months</option>
+              <option value="class">Classes</option>
+              <option value="location">Locations</option>
               <option value="prev_period">Compare: previous period</option>
               <option value="prev_year">Compare: same period last year</option>
             </NativeSelect>

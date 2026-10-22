@@ -5,12 +5,18 @@ import { Combobox } from "@/components/ui/combobox";
 import { Input, MoneyInput } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import { ACCOUNT_TYPE_LABELS, type AccountType } from "@/lib/coa";
+import { ClassSelect } from "@/components/tracking-fields";
 
 export interface CategoryLine {
   key: number;
   accountId: string | null;
   description: string;
   amountCents: number | null;
+  classId?: string | null;
+  billable?: boolean;
+  customerId?: string | null;
+  /** already on an invoice: billable and customer can't change */
+  billed?: boolean;
 }
 
 let seq = 0;
@@ -35,13 +41,19 @@ export function CategoryLines({
   accounts,
   allowNegative = true,
   label = "Category details",
+  classes = [],
+  customers,
 }: {
   lines: CategoryLine[];
   onChange: (lines: CategoryLine[]) => void;
   accounts: { id: string; name: string; type: AccountType }[];
   allowNegative?: boolean;
   label?: string;
+  classes?: { id: string; name: string }[];
+  /** pass customers to show the Billable and Customer columns */
+  customers?: { id: string; display_name: string }[];
 }) {
+  const custOptions = customers?.map((c) => ({ value: c.id, label: c.display_name })) ?? [];
   const options = accounts.map((a) => ({ value: a.id, label: a.name, hint: ACCOUNT_TYPE_LABELS[a.type] }));
   const update = (key: number, patch: Partial<CategoryLine>) => onChange(withSpareCategories(lines.map((l) => (l.key === key ? { ...l, ...patch } : l))));
   return (
@@ -55,6 +67,9 @@ export function CategoryLines({
               <th className="w-72 px-1 py-2">Category</th>
               <th className="px-1 py-2">Description</th>
               <th className="w-36 px-1 py-2 text-right">Amount</th>
+              {customers && <th className="w-16 px-1 py-2 text-center">Billable</th>}
+              {customers && <th className="w-52 px-1 py-2">Customer</th>}
+              {classes.length > 0 && <th className="w-40 px-1 py-2">Class</th>}
               <th className="w-10" />
             </tr>
           </thead>
@@ -71,6 +86,29 @@ export function CategoryLines({
                 <td className="px-1 py-1.5">
                   <MoneyInput aria-label={`Line ${idx + 1} amount`} allowNegative={allowNegative} value={l.amountCents} onValueChange={(v) => update(l.key, { amountCents: v })} />
                 </td>
+                {customers && (
+                  <td className="px-1 pt-3 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label={`Line ${idx + 1} billable`}
+                      title={l.billed ? "Already billed on an invoice" : undefined}
+                      disabled={l.billed}
+                      checked={!!l.billable}
+                      onChange={(e) => update(l.key, { billable: e.target.checked })}
+                      className="size-4 accent-[var(--color-accent)]"
+                    />
+                  </td>
+                )}
+                {customers && (
+                  <td className="px-1 py-1.5">
+                    <Combobox aria-label={`Line ${idx + 1} customer`} options={custOptions} value={l.customerId ?? null} onChange={(v) => update(l.key, { customerId: v })} placeholder="Optional" disabled={l.billed} />
+                  </td>
+                )}
+                {classes.length > 0 && (
+                  <td className="px-1 py-1.5">
+                    <ClassSelect label={`Line ${idx + 1} class`} classes={classes} value={l.classId ?? null} onChange={(v) => update(l.key, { classId: v })} />
+                  </td>
+                )}
                 <td className="pt-1.5">
                   {!isBlankCategory(l) && (
                     <button

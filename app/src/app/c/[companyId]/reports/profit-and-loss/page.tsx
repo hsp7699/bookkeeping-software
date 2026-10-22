@@ -20,12 +20,13 @@ export default async function ProfitAndLossPage({ params, searchParams }: { para
   const { companyId } = await params;
   await requireCompany(companyId);
   const p = await readParams(companyId, await searchParams);
-  const cmp = p.compare && !p.byMonth ? await profitAndLossCompare(companyId, p.from, p.to, p.basis, p.compare) : null;
-  const r = cmp ?? (await profitAndLoss(companyId, p.from, p.to, p.basis, p.byMonth));
+  const cmp = p.compare && !p.byMonth && !p.byDim ? await profitAndLossCompare(companyId, p.from, p.to, p.basis, p.compare) : null;
+  const r = cmp ?? (await profitAndLoss(companyId, p.from, p.to, p.basis, p.byDim ?? p.byMonth));
   // in compare mode the 4th column is a percentage (basis points), not money
   const isPct = (i: number) => !!cmp && i === 3;
   const empty = [r.income, r.cogs, r.expenses, r.otherIncome, r.otherExpense].every((s) => s.rows.length === 0);
   const drill = (accountId: string, col: number) => {
+    if (p.byDim) return col === r.columns.length - 1 ? `/c/${companyId}/reports/transactions?account=${accountId}&from=${p.from}&to=${p.to}&basis=${p.basis}` : undefined;
     if (cmp) return col === 0 ? `/c/${companyId}/reports/transactions?account=${accountId}&from=${p.from}&to=${p.to}&basis=${p.basis}` : col === 1 ? `/c/${companyId}/reports/transactions?account=${accountId}&from=${cmp.compareFrom}&to=${cmp.compareTo}&basis=${p.basis}` : undefined;
     const [from, to] =
       r.columns[col] === "Total"
@@ -70,14 +71,14 @@ export default async function ProfitAndLossPage({ params, searchParams }: { para
       title="Profit and loss"
       companyName={p.companyName}
       subtitle={`${formatDate(p.from)} – ${formatDate(p.to)}${cmp ? ` compared with ${formatDate(cmp.compareFrom)} – ${formatDate(cmp.compareTo)}` : ""} · ${p.basis === "cash" ? "Cash basis" : "Accrual basis"}`}
-      wide={p.byMonth || !!cmp}
-      toolbar={<ReportToolbar from={p.from} to={p.to} basis={p.basis} preset={p.preset} columns={p.byMonth ? "months" : cmp ? p.compare! : "total"} showColumns />}
+      wide={p.byMonth || !!cmp || !!p.byDim}
+      toolbar={<ReportToolbar from={p.from} to={p.to} basis={p.basis} preset={p.preset} columns={p.byDim ?? (p.byMonth ? "months" : cmp ? p.compare! : "total")} showColumns />}
     >
       {empty ? (
         <p className="py-8 text-center text-text-muted">No income or expenses in this period.</p>
       ) : (
         <table className="w-full border-collapse">
-          <thead className={cn(!p.byMonth && !cmp && "sr-only")}>
+          <thead className={cn(!p.byMonth && !cmp && !p.byDim && "sr-only")}>
             <tr className="border-b border-border text-xs text-text-muted uppercase">
               <th className="py-2 text-left">Account</th>
               {r.columns.map((c) => (

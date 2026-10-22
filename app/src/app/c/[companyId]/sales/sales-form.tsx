@@ -15,6 +15,7 @@ import { computeTotals } from "@/lib/posting";
 import type { InvoiceDetail } from "@/lib/queries";
 import { ApplyCredits } from "@/components/apply-credits";
 import { Attachments } from "@/components/attachments";
+import { ClassSelect, TrackingHeader, type Tracking } from "@/components/tracking-fields";
 import { TxnMoreMenu } from "@/components/txn-more-menu";
 import { EmailInvoiceDialog } from "./email-dialog";
 import { saveTransactionAction } from "../actions";
@@ -56,10 +57,14 @@ interface Props {
   incomeAccounts: Option[];
   initial: InvoiceDetail | null;
   presetCustomerId?: string;
+  tracking: Tracking;
 }
 
 interface Line {
   key: number;
+  classId: string | null;
+  /** bills this billable expense line */
+  billsLineId: string | null;
   itemId: string | null;
   description: string;
   qty: number | null;
@@ -69,7 +74,7 @@ interface Line {
 }
 
 let keySeq = 0;
-const blank = (): Line => ({ key: ++keySeq, itemId: null, description: "", qty: null, rateCents: null, amountCents: null, taxable: false });
+const blank = (): Line => ({ key: ++keySeq, classId: null, billsLineId: null, itemId: null, description: "", qty: null, rateCents: null, amountCents: null, taxable: false });
 
 function isEmpty(l: Line) {
   return !l.itemId && !l.description && !l.amountCents;
@@ -115,11 +120,15 @@ export function SalesForm(props: Props) {
   const [accountId, setAccountId] = useState(initial?.account_id ?? props.moneyAccounts[0]?.id ?? "");
   const [paymentMethod, setPaymentMethod] = useState(initial?.payment_method ?? "Check");
   const [closePassword, setClosePassword] = useState<string | null>(null);
+  const [locationId, setLocationId] = useState<string | null>(initial?.location_id ?? null);
+  const [tagIds, setTagIds] = useState<string[]>(initial?.tag_ids ?? []);
   const [emailOpen, setEmailOpen] = useState(false);
   const [lines, setLines] = useState<Line[]>(() =>
     withSpare(
       (initial?.lines ?? []).map((l) => ({
         key: ++keySeq,
+        classId: l.class_id,
+        billsLineId: l.bills_line_id,
         itemId: l.item_id,
         description: l.description ?? "",
         qty: l.qty,
@@ -200,7 +209,11 @@ export function SalesForm(props: Props) {
       accountId: hasMoneyAccount ? accountId || null : null,
       paymentMethod: hasMoneyAccount ? paymentMethod : null,
       number: number.trim() || null,
+      locationId,
+      tagIds,
       lines: filled.map((l) => ({
+        classId: l.classId,
+        billsLineId: l.billsLineId,
         itemId: l.itemId,
         description: l.description || null,
         qty: l.qty,
@@ -371,6 +384,8 @@ export function SalesForm(props: Props) {
           </div>
         </div>
 
+        <TrackingHeader tracking={props.tracking} locationId={locationId} onLocation={setLocationId} tagIds={tagIds} onTags={setTagIds} />
+
         {/* Line grid */}
         <div className="mt-8 overflow-x-auto">
           <table className="w-full min-w-[760px] border-collapse" aria-label={`${K.title} lines`}>
@@ -384,6 +399,7 @@ export function SalesForm(props: Props) {
                 <th className="w-32 px-1 py-2 text-right">Rate</th>
                 <th className="w-32 px-1 py-2 text-right">Amount</th>
                 <th className="w-12 px-1 py-2 text-center">Tax</th>
+                {props.tracking.classes.length > 0 && <th className="w-36 px-1 py-2">Class</th>}
                 <th className="w-10" />
               </tr>
             </thead>
@@ -457,6 +473,11 @@ export function SalesForm(props: Props) {
                       className="size-4 accent-[var(--color-accent)]"
                     />
                   </td>
+                  {props.tracking.classes.length > 0 && (
+                    <td className="px-1 py-1.5">
+                      <ClassSelect label={`Line ${idx + 1} class`} classes={props.tracking.classes} value={l.classId} onChange={(v) => updateLine(l.key, { classId: v })} />
+                    </td>
+                  )}
                   <td className="pt-1.5">
                     {!isEmpty(l) && (
                       <button

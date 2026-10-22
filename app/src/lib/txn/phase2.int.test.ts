@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { one, pool, query, tx } from "@/db";
 import { createCompany } from "@/lib/company";
+import { profitAndLoss } from "@/lib/reports/pnl";
 import { deleteTransaction, saveTransaction } from "./save";
 
 const d = process.env.DATABASE_URL ? describe : describe.skip;
@@ -70,6 +71,14 @@ d("phase 2 pipeline (database)", () => {
     expect(e).toEqual({ class_id: cls, location_id: loc });
     expect((await one<{ n: number }>("select count(*)::int as n from transaction_tags where transaction_id = $1", [inv.id]))!.n).toBe(1);
     await save({ type: "sales_tax_payment", txnDate: "2026-07-15", accountId: acct["Business Checking"], amountCents: 550 });
+    // paid in full later -> cash basis brings the class along
+    await save({ type: "payment", contactId: customer, txnDate: "2026-06-20", accountId: acct["Business Checking"], amountCents: 10550, applications: [{ txnId: inv.id, amountCents: 10550 }] });
+    for (const basis of ["accrual", "cash"] as const) {
+      const r = await profitAndLoss(companyId, "2026-06-01", "2026-06-30", basis, "class");
+      expect(r.columns).toEqual(["Design", "Not specified", "Total"]);
+      const services = r.income.rows.find((x) => x.name === "Services")!;
+      expect(services.amounts).toEqual([10000, 0, 10000]);
+    }
     const stp = await one<{ v: number }>("select sum(credit_cents - debit_cents)::bigint as v from ledger_entries where account_id = $1", [acct["Sales Tax Payable"]]);
     expect(stp!.v).toBe(0);
   });

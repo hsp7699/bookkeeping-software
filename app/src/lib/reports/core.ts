@@ -18,22 +18,22 @@ export type Basis = "accrual" | "cash";
  */
 export function ledgerSql(basis: Basis): string {
   if (basis === "accrual") {
-    return `select e.account_id, e.entry_date, (e.debit_cents - e.credit_cents)::bigint as net, e.transaction_id, e.contact_id
+    return `select e.account_id, e.entry_date, (e.debit_cents - e.credit_cents)::bigint as net, e.transaction_id, e.contact_id, e.class_id, e.location_id
             from ledger_entries e where e.company_id = $1`;
   }
   return `
-    select e.account_id, e.entry_date, (e.debit_cents - e.credit_cents)::bigint as net, e.transaction_id, e.contact_id
+    select e.account_id, e.entry_date, (e.debit_cents - e.credit_cents)::bigint as net, e.transaction_id, e.contact_id, e.class_id, e.location_id
     from ledger_entries e join transactions t on t.id = e.transaction_id join accounts a on a.id = e.account_id
     where e.company_id = $1
       and (t.type not in ('invoice','bill','payment','bill_payment','credit_memo','vendor_credit')
            or (t.type in ('payment','bill_payment') and a.type not in ('accounts_receivable','accounts_payable')))
     union all
-    select e.account_id, e.entry_date, (sign(e.debit_cents - e.credit_cents) * t.balance_cents)::bigint, e.transaction_id, e.contact_id
+    select e.account_id, e.entry_date, (sign(e.debit_cents - e.credit_cents) * t.balance_cents)::bigint, e.transaction_id, e.contact_id, e.class_id, e.location_id
     from ledger_entries e join transactions t on t.id = e.transaction_id join accounts a on a.id = e.account_id
     where e.company_id = $1 and t.type in ('payment','bill_payment') and t.balance_cents > 0
       and a.type in ('accounts_receivable','accounts_payable')
     union all
-    select x.account_id, x.pay_date, (x.v + case when x.rn = 1 then x.target - x.vsum else 0 end)::bigint, x.doc_id, x.contact_id
+    select x.account_id, x.pay_date, (x.v + case when x.rn = 1 then x.target - x.vsum else 0 end)::bigint, x.doc_id, x.contact_id, x.class_id, x.location_id
     from (
       select s.*, sum(s.v) over (partition by s.app_id, s.doc_id) as vsum
       from (
@@ -41,7 +41,7 @@ export function ledgerSql(basis: Basis): string {
         -- ... and, when the source is a credit memo or vendor credit, the same share of that credit
         select pa.id as app_id, e.account_id,
                case when p.type in ('credit_memo','vendor_credit') then greatest(p.txn_date, d0.txn_date) else p.txn_date end as pay_date,
-               d.id as doc_id, e.contact_id,
+               d.id as doc_id, e.contact_id, e.class_id, e.location_id,
                round((e.debit_cents - e.credit_cents)::numeric * pa.amount_cents / d.total_cents) as v,
                row_number() over (partition by pa.id, d.id order by abs(e.debit_cents - e.credit_cents) desc, e.id) as rn,
                case when d.type in ('invoice','vendor_credit') then -pa.amount_cents else pa.amount_cents end as target
@@ -126,4 +126,18 @@ export async function drilldown(companyId: string, basis: Basis, accountIds: str
      order by l.entry_date, t.created_at`,
     [companyId, accountIds, from, to],
   );
+}
+
+/** Activity per account split by class or location: { id, ..., dim (null = not specified), amount }. */
+export async function accountTotalsByDim(companyId: string, basis: Basis, from: string, to: string, types: AccountType[], dim: "class" | "location") {
+  const col = dim === "class" ? "class_id" : "location_id";
+  const rows = await query<{ id: string; name: string; number: string | null; type: AccountType; parent_id: string | null; dim: string | null; net: number }>(
+    `select a.id, a.name, a.number, a.type, a.parent_id, l.${col} as dim, sum(l.net)::bigint as net
+     from (${ledgerSql(basis)}) l join accounts a on a.id = l.account_id
+     where l.entry_date >= $2 and l.entry_date <= $3 and a.type = any($4::text[])
+     group by a.id, l.${col}
+     order by a.number nulls last, lower(a.name)`,
+    [companyId, from, to, types],
+  );
+  return rows.map((r) => ({ ...r, amount: natural(r.type, r.net) }));
 }

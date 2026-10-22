@@ -18,6 +18,7 @@ import type { PurchaseDetail } from "@/lib/queries";
 import { saveTransactionAction } from "../actions";
 import { ApplyCredits } from "@/components/apply-credits";
 import { Attachments } from "@/components/attachments";
+import { TrackingHeader, type Tracking } from "@/components/tracking-fields";
 
 export type PurchaseKind = "expense" | "check" | "bill" | "vendor_credit" | "credit_card_credit";
 
@@ -41,6 +42,8 @@ interface Props {
   terms: { id: string; name: string; due_days: number | null }[];
   initial: PurchaseDetail | null;
   presetVendorId?: string;
+  tracking: Tracking;
+  customers: { id: string; display_name: string }[];
 }
 
 export function PurchaseForm(props: Props) {
@@ -64,9 +67,20 @@ export function PurchaseForm(props: Props) {
   const [number, setNumber] = useState(initial?.number ?? "");
   const [method, setMethod] = useState(initial?.payment_method ?? "Credit card");
   const [memo, setMemo] = useState(initial?.memo ?? "");
+  const [locationId, setLocationId] = useState<string | null>(initial?.location_id ?? null);
+  const [tagIds, setTagIds] = useState<string[]>(initial?.tag_ids ?? []);
   const [lines, setLines] = useState<CategoryLine[]>(() =>
     withSpareCategories(
-      (initial?.lines ?? []).map((l, i) => ({ key: 100000 + i, accountId: l.account_id, description: l.description ?? "", amountCents: l.amount_cents })),
+      (initial?.lines ?? []).map((l, i) => ({
+        key: 100000 + i,
+        accountId: l.account_id,
+        description: l.description ?? "",
+        amountCents: l.amount_cents,
+        classId: l.class_id,
+        billable: l.billable,
+        customerId: l.contact_id,
+        billed: l.billed,
+      })),
     ),
   );
 
@@ -114,7 +128,16 @@ export function PurchaseForm(props: Props) {
           number: number.trim() || null,
           paymentMethod: kind === "expense" ? method : null,
           memo: memo || null,
-          lines: filled.map((l) => ({ accountId: l.accountId, description: l.description || null, amountCents: l.amountCents ?? 0 })),
+          locationId,
+          tagIds,
+          lines: filled.map((l) => ({
+            accountId: l.accountId,
+            description: l.description || null,
+            amountCents: l.amountCents ?? 0,
+            classId: l.classId ?? null,
+            contactId: l.customerId ?? null,
+            billable: !!l.billable && !!l.customerId,
+          })),
         },
         closePassword ?? undefined,
       );
@@ -250,8 +273,18 @@ export function PurchaseForm(props: Props) {
           </div>
         </div>
 
+        <TrackingHeader tracking={props.tracking} locationId={locationId} onLocation={setLocationId} tagIds={tagIds} onTags={setTagIds} />
+        {filled.some((l) => l.billable && !l.customerId) && (
+          <p className="mt-4 text-sm text-warning">Choose a customer for each billable line, or it won&apos;t show up to bill.</p>
+        )}
         <div className="mt-8">
-          <CategoryLines lines={lines} onChange={setLines} accounts={props.categories} />
+          <CategoryLines
+            lines={lines}
+            onChange={setLines}
+            accounts={props.categories}
+            classes={props.tracking.classes}
+            customers={kind === "vendor_credit" || kind === "credit_card_credit" ? undefined : props.customers}
+          />
         </div>
 
         <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_22rem]">

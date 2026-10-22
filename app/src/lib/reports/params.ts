@@ -38,6 +38,7 @@ export async function readParams(companyId: string, sp: ReportParams, defaultPre
     asOf: isDate(sp.asOf) ?? today,
     basis: (sp.basis === "cash" || sp.basis === "accrual" ? sp.basis : company!.accounting_method) as Basis,
     byMonth: sp.columns === "months",
+    byDim: (sp.columns === "class" || sp.columns === "location" ? sp.columns : null) as "class" | "location" | null,
     compare: (sp.compare === "prev_period" || sp.compare === "prev_year" ? sp.compare : null) as "prev_period" | "prev_year" | null,
   };
 }

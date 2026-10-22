@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireCompany } from "@/lib/authz";
-import { companyToday, getPurchaseDoc, listAccountsByType, listCategoryAccounts, listContactOptions, listTerms } from "@/lib/queries";
+import { companyToday, getPurchaseDoc, listAccountsByType, listCategoryAccounts, listContactOptions, listTerms, listTracking } from "@/lib/queries";
 import { PurchaseForm, type PurchaseKind } from "./purchase-form";
 
 type NewProps = { params: Promise<{ companyId: string }>; searchParams: Promise<{ vendor?: string; saved?: string }> };
@@ -9,14 +9,15 @@ type EditProps = { params: Promise<{ companyId: string; id: string }>; searchPar
 const NOUN: Record<PurchaseKind, string> = { expense: "Expense", check: "Check", bill: "Bill", vendor_credit: "Vendor credit", credit_card_credit: "Credit card credit" };
 
 async function load(companyId: string, kind: PurchaseKind) {
-  const [today, contacts, money, categories, terms] = await Promise.all([
+  const [today, contacts, money, categories, terms, tracking] = await Promise.all([
     companyToday(companyId),
     listContactOptions(companyId, ["vendor", "customer", "employee", "other"]),
     listAccountsByType(companyId, kind === "check" ? ["bank"] : kind === "credit_card_credit" ? ["credit_card"] : ["bank", "credit_card"]),
     listCategoryAccounts(companyId),
     listTerms(companyId),
+    listTracking(companyId),
   ]);
-  return { today, contacts, moneyAccounts: money, categories, terms };
+  return { today, contacts, moneyAccounts: money, categories, terms, tracking, customers: contacts.filter((c) => c.kind === "customer") };
 }
 
 function Saved({ text }: { text: string }) {

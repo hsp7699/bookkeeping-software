@@ -182,6 +182,11 @@ export function listInvoices(companyId: string, status: "all" | "open" | "overdu
 export interface InvoiceDetail {
   id: string;
   type: string;
+  location_id: string | null;
+  tag_ids: string[];
+  doc_status: string | null;
+  expires_on: string | null;
+  linked_from_id: string | null;
   account_id: string | null;
   payment_method: string | null;
   number: string | null;
@@ -208,6 +213,8 @@ export interface InvoiceDetail {
     rate_cents: number | null;
     amount_cents: number;
     taxable: boolean;
+    class_id: string | null;
+    bills_line_id: string | null;
   }[];
   payments: { id: string; txn_date: string; amount_cents: number }[];
 }
@@ -215,10 +222,12 @@ export interface InvoiceDetail {
 /** Any sales form: invoice, sales receipt, credit memo, refund receipt. */
 export function getSalesDoc(companyId: string, id: string, type: string) {
   return one<InvoiceDetail>(
-    `select t.id, t.type, t.account_id, t.payment_method, t.number, t.contact_id, t.txn_date, t.due_date, t.terms_id, t.memo, t.private_note, t.discount_cents, t.tax_rate_id,
+    `select t.id, t.type, t.account_id, t.payment_method, t.location_id, t.doc_status, t.expires_on, t.linked_from_id,
+            coalesce((select array_agg(tt.tag_id) from transaction_tags tt where tt.transaction_id = t.id), '{}') as tag_ids, t.number, t.contact_id, t.txn_date, t.due_date, t.terms_id, t.memo, t.private_note, t.discount_cents, t.tax_rate_id,
             t.subtotal_cents, t.tax_cents, t.total_cents, t.balance_cents, t.status, t.email_to::text[] as email_to, t.updated_at::text as updated_at,
             coalesce((select json_agg(json_build_object('item_id', l.item_id, 'account_id', l.account_id, 'description', l.description,
-               'qty', l.qty, 'rate_cents', l.rate_cents, 'amount_cents', l.amount_cents, 'taxable', l.taxable) order by l.position)
+               'qty', l.qty, 'rate_cents', l.rate_cents, 'amount_cents', l.amount_cents, 'taxable', l.taxable, 'class_id', l.class_id,
+               'bills_line_id', (select x.id from transaction_lines x where x.billed_line_id = l.id limit 1)) order by l.position)
              from transaction_lines l where l.transaction_id = t.id), '[]') as lines,
             coalesce((select json_agg(json_build_object('id', p.id, 'txn_date', p.txn_date, 'amount_cents', a.amount_cents) order by p.txn_date)
              from payment_applications a join transactions p on p.id = a.source_txn_id where a.target_txn_id = t.id), '[]') as payments
@@ -293,15 +302,21 @@ export interface PurchaseDetail {
   balance_cents: number;
   status: string;
   updated_at: string;
-  lines: { account_id: string | null; description: string | null; amount_cents: number; contact_id: string | null }[];
+  location_id: string | null;
+  tag_ids: string[];
+  doc_status: string | null;
+  linked_from_id: string | null;
+  lines: { account_id: string | null; description: string | null; amount_cents: number; contact_id: string | null; class_id: string | null; billable: boolean; billed: boolean }[];
 }
 
 export function getPurchaseDoc(companyId: string, id: string, type: string) {
   return one<PurchaseDetail>(
     `select t.id, t.type, t.contact_id, t.account_id, t.txn_date, t.due_date, t.terms_id, t.number, t.payment_method, t.memo,
-            t.total_cents, t.balance_cents, t.status, t.updated_at::text as updated_at,
+            t.total_cents, t.balance_cents, t.status, t.updated_at::text as updated_at, t.location_id, t.doc_status, t.linked_from_id,
+            coalesce((select array_agg(tt.tag_id) from transaction_tags tt where tt.transaction_id = t.id), '{}') as tag_ids,
             coalesce((select json_agg(json_build_object('account_id', l.account_id, 'description', l.description, 'amount_cents', l.amount_cents,
-               'contact_id', l.contact_id) order by l.position) from transaction_lines l where l.transaction_id = t.id), '[]') as lines
+               'contact_id', l.contact_id, 'class_id', l.class_id, 'billable', l.billable, 'billed', l.billed_line_id is not null) order by l.position)
+               from transaction_lines l where l.transaction_id = t.id), '[]') as lines
      from transactions t where t.company_id = $1 and t.id = $2 and t.type = $3`,
     [companyId, id, type],
   );
@@ -316,4 +331,20 @@ export function listCategoryAccounts(companyId: string) {
        'other_current_asset','other_current_liability','long_term_liability','equity','credit_card','bank'], type), lower(name)`,
     [companyId],
   );
+}
+
+export interface TrackingLists {
+  classes: { id: string; name: string }[];
+  locations: { id: string; name: string }[];
+  tags: { id: string; name: string }[];
+}
+
+/** Active classes, locations and tags. Forms only show these fields when a list has something in it. */
+export async function listTracking(companyId: string): Promise<TrackingLists> {
+  const [classes, locations, tags] = await Promise.all([
+    query<{ id: string; name: string }>("select id, name from classes where company_id = $1 and active order by lower(name)", [companyId]),
+    query<{ id: string; name: string }>("select id, name from locations where company_id = $1 and active order by lower(name)", [companyId]),
+    query<{ id: string; name: string }>("select id, name from tags where company_id = $1 order by lower(name)", [companyId]),
+  ]);
+  return { classes, locations, tags };
 }

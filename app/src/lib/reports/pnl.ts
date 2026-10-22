@@ -1,5 +1,6 @@
 import "server-only";
-import { accountTotals, accountTotalsByMonth, monthsBetween, type Basis } from "./core";
+import { query } from "@/db";
+import { accountTotals, accountTotalsByDim, accountTotalsByMonth, monthsBetween, type Basis } from "./core";
 import type { AccountType } from "@/lib/coa";
 
 export interface ReportRow {
@@ -73,11 +74,33 @@ const sumCols = (rows: { amounts: number[] }[], n: number) => Array.from({ lengt
 const sub = (a: number[], b: number[]) => a.map((v, i) => v - b[i]);
 const add = (a: number[], b: number[]) => a.map((v, i) => v + b[i]);
 
-export async function profitAndLoss(companyId: string, from: string, to: string, basis: Basis, byMonth = false, parents?: Map<string, string | null>): Promise<ProfitAndLoss> {
+export async function profitAndLoss(
+  companyId: string,
+  from: string,
+  to: string,
+  basis: Basis,
+  byMonth: boolean | "class" | "location" = false,
+  parents?: Map<string, string | null>,
+): Promise<ProfitAndLoss> {
   const types = SECTIONS.map((s) => s.type);
   let columns: string[];
   let perAccount: Map<string, { id: string; name: string; type: AccountType; parent_id: string | null; amounts: number[] }>;
-  if (byMonth) {
+  if (byMonth === "class" || byMonth === "location") {
+    // one column per class (or location), then "Not specified", then the total
+    const dims = await query<{ id: string; name: string }>(`select id, name from ${byMonth === "class" ? "classes" : "locations"} where company_id = $1 order by lower(name)`, [companyId]);
+    const rows = await accountTotalsByDim(companyId, basis, from, to, types, byMonth);
+    const used = new Set(rows.filter((r) => r.amount !== 0).map((r) => r.dim));
+    const shown = dims.filter((d) => used.has(d.id));
+    const keys: (string | null)[] = [...shown.map((d) => d.id), null];
+    columns = [...shown.map((d) => d.name), "Not specified", "Total"];
+    perAccount = new Map();
+    for (const r of rows) {
+      const e = perAccount.get(r.id) ?? { id: r.id, name: r.name, type: r.type, parent_id: r.parent_id, amounts: Array(columns.length).fill(0) };
+      e.amounts[keys.indexOf(r.dim)] += r.amount;
+      e.amounts[columns.length - 1] += r.amount;
+      perAccount.set(r.id, e);
+    }
+  } else if (byMonth) {
     const months = monthsBetween(from, to);
     columns = [...months, "Total"];
     perAccount = new Map();
