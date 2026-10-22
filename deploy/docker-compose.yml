@@ -26,6 +26,8 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env}
       AUTH_TRUST_HOST: "true"
       AUTH_URL: https://${DOMAIN}
+      APP_URL: https://${DOMAIN}
+      JOBS: ${JOBS:-on}
       ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
       SMTP_URL: ${SMTP_URL:-}
       MAIL_FROM: ${MAIL_FROM:-}
