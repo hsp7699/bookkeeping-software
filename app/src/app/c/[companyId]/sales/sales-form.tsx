@@ -688,6 +688,7 @@ export function SalesForm(props: Props) {
               label={K.noun}
               voided={initial.status === "voided"}
               afterDelete={`/c/${companyId}/sales`}
+              recur={{ txnType: kind, txnDate: initial.txn_date, name: `${customers.find((c) => c.id === initial.contact_id)?.display_name ?? "Customer"} ${K.noun}` }}
               extra={[
                 { label: "Print or download PDF", onSelect: () => window.open(`${base}/${initial.id}/pdf`, "_blank") },
                 ...(isInvoice && initial.status !== "voided" ? [{ label: "Email invoice", onSelect: () => setEmailOpen(true) }] : []),

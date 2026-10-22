@@ -2,10 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { one, query } from "@/db";
+import { one } from "@/db";
 import { requireCompany } from "@/lib/authz";
-import { mailConfigured, sendMail } from "@/lib/mail";
-import { loadPdfDoc, renderSalesPdf } from "@/lib/pdf/load";
+import { sendInvoiceEmail } from "@/lib/invoice-email";
+import { mailConfigured } from "@/lib/mail";
 import type { ActionResult } from "../actions";
 
 const schema = z.object({
@@ -21,29 +21,15 @@ export async function sendInvoiceAction(companyId: string, invoiceId: string, ra
   if (!mailConfigured()) {
     return { ok: false, error: "Email isn't set up yet. Add SMTP_URL and MAIL_FROM to the server's .env file, then try again. You can download the PDF meanwhile." };
   }
-  const doc = await loadPdfDoc(companyId, invoiceId, "invoice");
-  if (!doc) return { ok: false, error: "This invoice no longer exists." };
-  if (doc.voided) return { ok: false, error: "A voided invoice can't be sent." };
-  const company = await one<{ email: string | null }>("select email from companies where id = $1", [companyId]);
+  const inv = await one<{ status: string }>("select status from transactions where company_id = $1 and id = $2 and type = 'invoice'", [companyId, invoiceId]);
+  if (!inv) return { ok: false, error: "This invoice no longer exists." };
+  if (inv.status === "voided") return { ok: false, error: "A voided invoice can't be sent." };
   try {
-    await sendMail({
-      to: parsed.data.to,
-      replyTo: company?.email,
-      subject: parsed.data.subject,
-      text: parsed.data.body,
-      attachments: [{ filename: `Invoice-${doc.number ?? "draft"}.pdf`, content: await renderSalesPdf(doc) }],
-    });
+    await sendInvoiceEmail(companyId, ctx.userId, invoiceId, parsed.data);
   } catch (e) {
     console.error(e);
     return { ok: false, error: "The email server didn't accept the message. Check the SMTP settings and the address, then try again." };
   }
-  await query("update transactions set emailed_at = now(), email_to = $3 where company_id = $1 and id = $2", [companyId, invoiceId, parsed.data.to]);
-  await query("insert into audit_events (company_id, user_id, entity, entity_id, action, after) values ($1, $2, 'transaction', $3, 'update', $4)", [
-    companyId,
-    ctx.userId,
-    invoiceId,
-    JSON.stringify({ type: "invoice", number: doc.number, emailed_to: parsed.data.to }),
-  ]);
   revalidatePath(`/c/${companyId}`, "layout");
   return { ok: true, data: null };
 }

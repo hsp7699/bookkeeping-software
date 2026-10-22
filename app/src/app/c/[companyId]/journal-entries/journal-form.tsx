@@ -136,7 +136,16 @@ export function JournalForm({
           <Button asChild>
             <Link href={`/c/${companyId}/accounts`}>Cancel</Link>
           </Button>
-          {initial && <TxnMoreMenu companyId={companyId} txnId={initial.id} label="journal entry" voided={voided} afterDelete={`/c/${companyId}/accounts`} />}
+          {initial && (
+            <TxnMoreMenu
+              companyId={companyId}
+              txnId={initial.id}
+              label="journal entry"
+              voided={voided}
+              afterDelete={`/c/${companyId}/accounts`}
+              recur={{ txnType: "journal_entry", txnDate: initial.txn_date, name: initial.memo ? initial.memo.slice(0, 80) : "Journal entry" }}
+            />
+          )}
         </>
       }
       right={

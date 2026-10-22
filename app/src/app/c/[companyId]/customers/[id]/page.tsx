@@ -98,6 +98,9 @@ export default async function CustomerPage({ params }: { params: Promise<{ compa
             }}
           />
           <Button asChild>
+            <Link href={`${base}/customers/${id}/statement`}>Statement</Link>
+          </Button>
+          <Button asChild>
             <Link href={`${base}/payments/new?customer=${id}`}>Receive payment</Link>
           </Button>
           <Button asChild variant="primary">

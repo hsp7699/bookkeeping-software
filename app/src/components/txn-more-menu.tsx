@@ -8,6 +8,8 @@ import { deleteTransactionAction, voidTransactionAction } from "@/app/c/[company
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/field";
+import { RecurringDrawer, type RecurringValues } from "@/components/recurring-drawer";
+import { nextOccurrence, RECURRING_TYPES } from "@/lib/recurring/schedule";
 
 interface Extra {
   label: string;
@@ -22,6 +24,7 @@ export function TxnMoreMenu({
   voided,
   afterDelete,
   extra = [],
+  recur,
 }: {
   companyId: string;
   txnId: string;
@@ -29,6 +32,8 @@ export function TxnMoreMenu({
   voided?: boolean;
   afterDelete: string;
   extra?: Extra[];
+  /** offer "Make recurring" for this saved transaction */
+  recur?: { txnType: string; txnDate: string; name: string };
 }) {
   const router = useRouter();
   const [confirm, setConfirm] = useState<"void" | "delete" | null>(null);
@@ -36,6 +41,8 @@ export function TxnMoreMenu({
   const [needsPassword, setNeedsPassword] = useState(false);
   const [password, setPassword] = useState("");
   const [pending, start] = useTransition();
+  const [recurOpen, setRecurOpen] = useState(false);
+  const canRecur = recur && !voided && (RECURRING_TYPES as readonly string[]).includes(recur.txnType);
 
   function run() {
     start(async () => {
@@ -67,6 +74,11 @@ export function TxnMoreMenu({
                 {e.label}
               </Menu.Item>
             ))}
+            {canRecur && (
+              <Menu.Item onSelect={() => setRecurOpen(true)} className="cursor-pointer px-3 py-1.5 outline-none data-[highlighted]:bg-row-hover">
+                Make recurring
+              </Menu.Item>
+            )}
             {!voided && (
               <Menu.Item onSelect={() => { setError(null); setConfirm("void"); }} className="cursor-pointer px-3 py-1.5 outline-none data-[highlighted]:bg-row-hover">
                 Void
@@ -106,6 +118,19 @@ export function TxnMoreMenu({
           </div>
         )}
       </ConfirmDialog>
+      {canRecur && <RecurringDrawer companyId={companyId} open={recurOpen} onOpenChange={setRecurOpen} initial={recurDefaults(txnId, recur)} />}
     </>
   );
+}
+
+/** Monthly from the transaction's date, starting with the next date that hasn't passed. */
+function recurDefaults(txnId: string, r: { txnType: string; txnDate: string; name: string }): RecurringValues {
+  const day = Number(r.txnDate.slice(8));
+  const [y, m] = r.txnDate.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const sched = { unit: "month" as const, count: 1, dayOfMonth: day === lastDay ? 31 : Math.min(day, 28) };
+  const today = new Date().toLocaleDateString("en-CA");
+  let next = nextOccurrence(r.txnDate, sched);
+  while (next < today) next = nextOccurrence(next, sched);
+  return { txnId, txnType: r.txnType, name: r.name, mode: "scheduled", intervalUnit: "month", intervalCount: 1, dayOfMonth: sched.dayOfMonth, nextDate: next, endDate: null, autoSend: false };
 }

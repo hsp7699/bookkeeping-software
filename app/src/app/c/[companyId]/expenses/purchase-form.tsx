@@ -335,7 +335,16 @@ export function PurchaseForm(props: Props) {
           <Button asChild>
             <Link href={`/c/${companyId}/expenses`}>Cancel</Link>
           </Button>
-          {initial && <TxnMoreMenu companyId={companyId} txnId={initial.id} label={K.noun} voided={voided} afterDelete={`/c/${companyId}/expenses`} />}
+          {initial && (
+            <TxnMoreMenu
+              companyId={companyId}
+              txnId={initial.id}
+              label={K.noun}
+              voided={voided}
+              afterDelete={`/c/${companyId}/expenses`}
+              recur={{ txnType: kind, txnDate: initial.txn_date, name: `${contacts.find((c) => c.id === initial.contact_id)?.display_name ?? "Monthly"} ${K.noun}` }}
+            />
+          )}
           {isPo && initial && !voided && initial.doc_status !== "closed" && (
             <Button asChild variant="ghost">
               <Link href={`/c/${companyId}/bills/new?fromPo=${initial.id}`}>Create bill</Link>

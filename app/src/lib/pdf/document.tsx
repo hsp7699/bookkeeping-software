@@ -1,4 +1,4 @@
-import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
+import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { formatDate } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 
@@ -22,6 +22,7 @@ export interface PdfDoc {
   balanceCents: number;
   memo: string | null;
   voided: boolean;
+  brand: { accent: string; logo: Buffer | null; footer: string | null; showQtyRate: boolean };
 }
 
 const s = StyleSheet.create({
@@ -47,13 +48,16 @@ function addressLines(a: Record<string, string>) {
 }
 
 export function SalesPdf({ d }: { d: PdfDoc }) {
-  const qtyCol = d.lines.some((l) => l.qty != null && l.qty !== 1);
+  const qtyCol = d.brand.showQtyRate && d.lines.some((l) => l.qty != null && l.qty !== 1);
+  const accent = { color: d.brand.accent };
   return (
     <Document title={`${d.title} ${d.number ?? ""}`} author={d.company.name}>
       <Page size="LETTER" style={s.page}>
         {d.voided && <Text style={s.void}>VOID</Text>}
         <View style={s.between}>
           <View>
+            {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image has no alt */}
+            {d.brand.logo && <Image src={d.brand.logo} style={{ maxWidth: 140, maxHeight: 56, marginBottom: 8, objectFit: "contain" }} />}
             <Text style={[s.bold, { fontSize: 13 }]}>{d.company.name}</Text>
             {addressLines(d.company.address).map((l) => (
               <Text key={l} style={s.muted}>
@@ -64,7 +68,7 @@ export function SalesPdf({ d }: { d: PdfDoc }) {
             {d.company.phone && <Text style={s.muted}>{d.company.phone}</Text>}
           </View>
           <View style={{ alignItems: "flex-end" }}>
-            <Text style={s.h1}>{d.title}</Text>
+            <Text style={[s.h1, accent]}>{d.title}</Text>
             {d.number && <Text style={s.muted}>No. {d.number}</Text>}
           </View>
         </View>
@@ -134,7 +138,7 @@ export function SalesPdf({ d }: { d: PdfDoc }) {
               <Text>{formatCents(d.taxCents)}</Text>
             </View>
           )}
-          <View style={[s.totalRow, { borderTopWidth: 1, borderTopColor: "#161a20", marginTop: 4, paddingTop: 6 }]}>
+          <View style={[s.totalRow, { borderTopWidth: 1, borderTopColor: d.brand.accent, marginTop: 4, paddingTop: 6 }]}>
             <Text style={s.bold}>Total</Text>
             <Text style={s.bold}>{formatCents(d.totalCents)}</Text>
           </View>
@@ -146,8 +150,8 @@ export function SalesPdf({ d }: { d: PdfDoc }) {
           )}
           {d.title === "Invoice" && (
             <View style={[s.totalRow, { marginTop: 4 }]}>
-              <Text style={s.big}>Balance due</Text>
-              <Text style={s.big}>{formatCents(d.balanceCents)}</Text>
+              <Text style={[s.big, accent]}>Balance due</Text>
+              <Text style={[s.big, accent]}>{formatCents(d.balanceCents)}</Text>
             </View>
           )}
         </View>
@@ -156,6 +160,122 @@ export function SalesPdf({ d }: { d: PdfDoc }) {
           <View style={{ marginTop: 32 }}>
             <Text>{d.memo}</Text>
           </View>
+        )}
+        {d.brand.footer && (
+          <Text style={{ position: "absolute", bottom: 32, left: 48, right: 48, textAlign: "center", fontSize: 8, color: "#59626e" }} fixed>
+            {d.brand.footer}
+          </Text>
+        )}
+      </Page>
+    </Document>
+  );
+}
+
+export interface StatementPdfDoc {
+  title: string; // "Statement"
+  kind: "balance_forward" | "open_item";
+  from: string;
+  to: string;
+  company: PdfDoc["company"];
+  customer: { name: string; address: Record<string, string> };
+  openingCents: number;
+  rows: { date: string; label: string; dueDate: string | null; amountCents: number; balanceCents: number }[];
+  closingCents: number;
+  aging: { current: number; d1_30: number; d31_60: number; d61_90: number; d91: number };
+  brand: { accent: string; logo: Buffer | null; footer: string | null };
+}
+
+export function StatementPdf({ d }: { d: StatementPdfDoc }) {
+  const accent = { color: d.brand.accent };
+  const fwd = d.kind === "balance_forward";
+  const buckets: [string, number][] = [
+    ["Current", d.aging.current],
+    ["1-30 days", d.aging.d1_30],
+    ["31-60 days", d.aging.d31_60],
+    ["61-90 days", d.aging.d61_90],
+    ["Over 90", d.aging.d91],
+  ];
+  return (
+    <Document title={`Statement ${d.customer.name}`} author={d.company.name}>
+      <Page size="LETTER" style={s.page}>
+        <View style={s.between}>
+          <View>
+            {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image has no alt */}
+            {d.brand.logo && <Image src={d.brand.logo} style={{ maxWidth: 140, maxHeight: 56, marginBottom: 8, objectFit: "contain" }} />}
+            <Text style={[s.bold, { fontSize: 13 }]}>{d.company.name}</Text>
+            {addressLines(d.company.address).map((l) => (
+              <Text key={l} style={s.muted}>
+                {l}
+              </Text>
+            ))}
+            {d.company.email && <Text style={s.muted}>{d.company.email}</Text>}
+            {d.company.phone && <Text style={s.muted}>{d.company.phone}</Text>}
+          </View>
+          <View style={{ alignItems: "flex-end" }}>
+            <Text style={[s.h1, accent]}>Statement</Text>
+            <Text style={s.muted}>{fwd ? `${formatDate(d.from)} to ${formatDate(d.to)}` : `As of ${formatDate(d.to)}`}</Text>
+          </View>
+        </View>
+
+        <View style={[s.between, { marginTop: 32 }]}>
+          <View>
+            <Text style={s.label}>To</Text>
+            <Text style={s.bold}>{d.customer.name}</Text>
+            {addressLines(d.customer.address).map((l) => (
+              <Text key={l}>{l}</Text>
+            ))}
+          </View>
+          <View style={{ alignItems: "flex-end" }}>
+            <Text style={s.label}>Amount due</Text>
+            <Text style={[s.big, accent]}>{formatCents(d.closingCents)}</Text>
+          </View>
+        </View>
+
+        <View style={{ marginTop: 28 }}>
+          <View style={s.row}>
+            <Text style={[s.th, { width: 70 }]}>Date</Text>
+            <Text style={[s.th, { flex: 1 }]}>Activity</Text>
+            <Text style={[s.th, { width: 70 }]}>Due</Text>
+            <Text style={[s.th, s.num, { width: 85 }]}>{fwd ? "Amount" : "Open amount"}</Text>
+            {fwd && <Text style={[s.th, s.num, { width: 85 }]}>Balance</Text>}
+          </View>
+          {fwd && (
+            <View style={s.row}>
+              <Text style={[s.td, { width: 70 }]}>{formatDate(d.from)}</Text>
+              <Text style={[s.td, { flex: 1 }]}>Balance forward</Text>
+              <Text style={[s.td, { width: 70 }]} />
+              <Text style={[s.td, s.num, { width: 85 }]} />
+              <Text style={[s.td, s.num, { width: 85 }]}>{formatCents(d.openingCents)}</Text>
+            </View>
+          )}
+          {d.rows.map((r, i) => (
+            <View key={i} style={s.row} wrap={false}>
+              <Text style={[s.td, { width: 70 }]}>{formatDate(r.date)}</Text>
+              <Text style={[s.td, { flex: 1 }]}>{r.label}</Text>
+              <Text style={[s.td, { width: 70 }]}>{r.dueDate ? formatDate(r.dueDate) : ""}</Text>
+              <Text style={[s.td, s.num, { width: 85 }]}>{formatCents(r.amountCents)}</Text>
+              {fwd && <Text style={[s.td, s.num, { width: 85 }]}>{formatCents(r.balanceCents)}</Text>}
+            </View>
+          ))}
+        </View>
+
+        <View style={[s.row, { marginTop: 28, borderTopWidth: 1, borderTopColor: d.brand.accent }]} wrap={false}>
+          {buckets.map(([k, v]) => (
+            <View key={k} style={{ flex: 1, paddingTop: 6 }}>
+              <Text style={s.label}>{k}</Text>
+              <Text>{formatCents(v)}</Text>
+            </View>
+          ))}
+          <View style={{ flex: 1, paddingTop: 6 }}>
+            <Text style={s.label}>Amount due</Text>
+            <Text style={s.bold}>{formatCents(d.closingCents)}</Text>
+          </View>
+        </View>
+
+        {d.brand.footer && (
+          <Text style={{ position: "absolute", bottom: 32, left: 48, right: 48, textAlign: "center", fontSize: 8, color: "#59626e" }} fixed>
+            {d.brand.footer}
+          </Text>
         )}
       </Page>
     </Document>
