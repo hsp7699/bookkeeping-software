@@ -50,7 +50,7 @@ const groups: { label?: string; items: Item[] }[] = [
     label: "Banking",
     items: [
       { href: "/banking", label: "Bank transactions", icon: Landmark },
-      { href: "/reconcile", label: "Reconcile", icon: Scale, soon: true },
+      { href: "/reconcile", label: "Reconcile", icon: Scale },
     ],
   },
   {

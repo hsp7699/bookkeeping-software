@@ -169,7 +169,7 @@ function translateDbError(e: unknown): unknown {
   const err = e as { code?: string; constraint?: string; message?: string };
   if (err.code === "23505" && err.constraint === "txn_number_unique") return new UserError("That number is already used. Pick another.");
   if (err.code === "23514" && err.message?.includes("closed period")) return new UserError(err.message.replace(/^date/, "The date").replace(/^transaction dated/, "This transaction, dated") + ". Enter the close-books password to change it.");
-  if (err.code === "23514" && err.message?.includes("reconciled")) return new UserError("Part of this transaction is reconciled. Changing it would throw off your reconciliation.");
+  if (err.code === "23514" && err.message?.includes("reconciled")) return new UserError("Part of this transaction is reconciled, so changing it would throw off that reconciliation. To change it, undo the reconciliation first (Reconcile → History).");
   if (err.code === "23503" && err.message?.includes("payment_applications")) return new UserError("Payments are applied to this. Delete or edit those payments first.");
   if (err.code === "23503" && err.message?.includes("deposit_items")) return new UserError("This payment is part of a bank deposit. Remove it from the deposit first.");
   return e;
