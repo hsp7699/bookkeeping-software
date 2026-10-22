@@ -1,0 +1,72 @@
+/* Generated from replica/design/tokens.json. Do not edit by hand. */
+@theme {
+  --color-bg: #ffffff;
+  --color-surface: #f5f6f8;
+  --color-surface-raised: #ffffff;
+  --color-row-hover: #f0f3f7;
+  --color-row-selected: #e8eefb;
+  --color-border: #e1e4e9;
+  --color-border-input: #7d8693;
+  --color-text: #161a20;
+  --color-text-muted: #59626e;
+  --color-text-subtle: #6b7380;
+  --color-nav-bg: #1d232c;
+  --color-nav-text: #c9cfd8;
+  --color-nav-text-active: #ffffff;
+  --color-nav-item-active: #323b48;
+  --color-accent: #3157d5;
+  --color-accent-hover: #2647b8;
+  --color-on-accent: #ffffff;
+  --color-accent-soft: #e8eefb;
+  --color-on-accent-soft: #2340a6;
+  --color-focus-ring: #3157d5;
+  --color-danger: #c22f2f;
+  --color-danger-soft: #fdecec;
+  --color-on-danger-soft: #9e2020;
+  --color-success: #1d7547;
+  --color-success-soft: #e6f4ec;
+  --color-on-success-soft: #155c37;
+  --color-warning: #a35a00;
+  --color-warning-soft: #fdf1e1;
+  --color-on-warning-soft: #7f4600;
+  --color-info-soft: #eaf2fb;
+  --color-on-info-soft: #1d4e89;
+  --color-negative-amount: #b42323;
+  --font-sans: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.125rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.25rem;
+  --text-md: 1rem;
+  --text-md--line-height: 1.5rem;
+  --text-lg: 1.25rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl: 1.5rem;
+  --text-xl--line-height: 2rem;
+  --text-display: 2rem;
+  --text-display--line-height: 2.5rem;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+  --shadow-card: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.08);
+  --shadow-pop: 0 10px 28px rgba(16,24,40,.16);
+  --shadow-drawer: -8px 0 28px rgba(16,24,40,.14);
+  --ease-ui: cubic-bezier(.2,.8,.2,1);
+}
+
+:root {
+  --nav-width: 232px;
+  --nav-width-collapsed: 64px;
+  --header-height: 56px;
+  --content-max: 1440px;
+  --drawer-width: 480px;
+  --form-action-bar-height: 64px;
+  --table-row-height: 40px;
+  --table-row-height-dense: 32px;
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+}
